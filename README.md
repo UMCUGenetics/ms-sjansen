@@ -1,5 +1,5 @@
 # ms-sjansen
-# Data major internship
+#Data major internship
 
-# student: Shelby Jansen 
-# daiy supervisor: Luca Santuari
+#student: Shelby Jansen 
+#daiy supervisor: Luca Santuari
