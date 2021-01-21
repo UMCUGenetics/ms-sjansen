@@ -1,450 +1,419 @@
-{
- "cells": [
-  {
-   "cell_type": "code",
-   "execution_count": null,
-   "metadata": {},
-   "outputs": [],
-   "source": [
-    "import pysam\n",
-    "import os \n",
-    "import statistics as st\n",
-    "from collections import defaultdict\n",
-    "from cigar import Cigar\n",
-    "import pandas as pd\n",
-    "\n",
-    "\n",
-    "def left_clipped(read):\n",
-    "    '''\n",
-    "    Function to determine is read is left clipped\n",
-    "    by L.santuari (sv-channels)\n",
-    "    '''\n",
-    "    \n",
-    "    if read.cigartuples is not None:\n",
-    "            if read.cigartuples[0][0] in [4,5]:\n",
-    "                return True\n",
-    "            else:\n",
-    "                return False\n",
-    "    else:\n",
-    "        return False\n",
-    "    \n",
-    "    \n",
-    "def right_clipped(read):\n",
-    "    '''\n",
-    "    Function to determine is read is left clipped\n",
-    "    by L.santuari (sv-channels)\n",
-    "    '''\n",
-    "    \n",
-    "    if read.cigartuples is not None:\n",
-    "            if read.cigartuples[-1][0] in [4,5]:\n",
-    "                return True\n",
-    "            else:\n",
-    "                return False\n",
-    "    else:\n",
-    "        return\n",
-    "\n",
-    "    \n",
-    "def get_sa(read, both=False):\n",
-    "    '''\n",
-    "    Get supplementary Alignment\n",
-    "    If only one SA: returns list with four elements\n",
-    "    If two SAs: returns nested list (two lists within one list)\n",
-    "    '''\n",
-    "    \n",
-    "    if not read.is_unmapped:\n",
-    "        if read.has_tag('SA'):\n",
-    "            if len(read.get_tag('SA')) > 0:\n",
-    "                sa = read.get_tag('SA').split(\",\") # split the string\n",
-    "                if len(sa) < 7:\n",
-    "                    sa_list = [sa[0],sa[1],sa[2],sa[3]]\n",
-    "                    return sa_list # return the list\n",
-    "               \n",
-    "                elif len(sa) >6 and len(sa) < 12 and both:\n",
-    "                    sa_list = [None,None]\n",
-    "                    sa_list[0] =[sa[0],sa[1],sa[2],sa[3]] # append info first split alignment\n",
-    "                    sa_list[1] = [sa[5][-2:],sa[6],sa[7],sa[8]] # append info second split alignment\n",
-    "                    return sa_list # return the list\n",
-    "\n",
-    "def av_distance_reads(bam):\n",
-    "    \n",
-    "    distances = []\n",
-    "    for read in bam.fetch():\n",
-    "        \n",
-    "        if read.is_proper_pair and (not read.is_unmapped) \\\n",
-    "        and read.is_reverse != read.mate_is_reverse \\\n",
-    "        and read.reference_name == read.next_reference_name:\n",
-    "            \n",
-    "            dis = abs(read.next_reference_start - read.reference_start)\n",
-    "            if dis < 10**3:\n",
-    "                \n",
-    "                distances.append(dis)\n",
-    "            \n",
-    "            if len(distances) > 2 * 10 ** 6:\n",
-    "                break\n",
-    "    mean = st.mean(distances)\n",
-    "    stdev = st.stdev(distances)\n",
-    "    return mean, stdev\n",
-    "\n",
-    "def get_dataframe(dictionary,chr_list):\n",
-    "    '''\n",
-    "    Makes dataframe of given dictionary \n",
-    "    binned on chromosome \n",
-    "    binned on orientation of reads\n",
-    "    '''\n",
-    "\n",
-    "    def get_subdf(dictionary,chr):\n",
-    "        if len(dictionary[chr]) == 4:\n",
-    "            cols = ['chr1','start','chr2','end']\n",
-    "        elif len(dictionary[chr]) == 8:\n",
-    "            cols = ['chr1 left','start left','chr2 left','end left','chr1 right','start right','chr2 right', 'end right']\n",
-    "        sides = ['FR','RF','FF','RR']\n",
-    "        for side in range(0,len(sides)):\n",
-    "            sides[side] = pd.DataFrame(dictionary[chr][sides[side]], columns = cols)\n",
-    "        df = pd.concat([sides[0],sides[1],sides[2],sides[3]])\n",
-    "        \n",
-    "        return df\n",
-    "\n",
-    "\n",
-    "    name = 'chrom{}'\n",
-    "    chroms = []\n",
-    "    for ch in chr_list:\n",
-    "        chroms.append(name.format(ch))   \n",
-    "    \n",
-    "    for i in range(0,len(chroms)):\n",
-    "        chroms[i] = get_subdf(dictionary,chr_list[i])\n",
-    "    total_df = pd.concat([chroms[0], chroms[1]],axis=1,keys = chr_list)\n",
-    "    \n",
-    "    return total_df\n",
-    "\n",
-    "class bin_reads:\n",
-    "    '''\n",
-    "    Class to extract: discordant read pairs, split and clipped reads.\n",
-    "    positions of reads are returned in dictionary format\n",
-    "    reads are binned on the contig they map to and orientation (forward, reverse)\n",
-    "    discordant reads are additionally binned based on how far the distance between readpairs deviates from mean +- STDEV \n",
-    "    '''\n",
-    "    \n",
-    "    \n",
-    "    def __init__(self,bam,chr=False,start=False,end=False):\n",
-    "        '''\n",
-    "        param bam: bamfile (pysam alignment)\n",
-    "        opt.param chr: contig of interest\n",
-    "        opt.param start = start position\n",
-    "        opt.param end = end position\n",
-    "        '''\n",
-    "        \n",
-    "        \n",
-    "        self.header = bam.header\n",
-    "        self.chr_list = list(i['SN'] for i in self.header['SQ'])\n",
-    "        self.orientation = ['FF','RR','FR','RF']\n",
-    "        if not(chr and start and end):\n",
-    "            self.iter = bam.fetch()\n",
-    "        else:\n",
-    "            self.iter = bam.fetch(chr,start,end)\n",
-    "            \n",
-    "\n",
-    "    def sort_read(self,read,split=False):\n",
-    "        '''\n",
-    "        \n",
-    "        function to extract information about reads,\n",
-    "        Determines the start and end,\n",
-    "        Determines orientation \n",
-    "        '''\n",
-    "        \n",
-    "        \n",
-    "        if split:\n",
-    "            orien = {'+':True,'-':False}\n",
-    "            sa_info = get_sa(read)\n",
-    "            if sa_info is not None: \n",
-    "                if len(sa_info) == 4: # if there is only 1 SA, get_sa returns a list with the length of 4 (contig, start, orientation, cigar)\n",
-    "                    if left_clipped(read) and not right_clipped(read):\n",
-    "                        chr1 = sa_info[0]\n",
-    "                        start = sa_info[1]\n",
-    "                        chr2 = read.reference_name\n",
-    "                        end = read.reference_start\n",
-    "                    elif right_clipped(read) and not left_clipped(read):\n",
-    "                        chr1 = read.reference_name\n",
-    "                        start = read.reference_end\n",
-    "                        chr2 = sa_info[0]\n",
-    "                        end = rsa_info[1]\n",
-    "                    if not read.is_reverse and not orien[sa_info[2]]:\n",
-    "                        orien = 'FR'\n",
-    "                    elif read.is_reverse and orien[sa_info[2]]:\n",
-    "                        orien = 'RF'\n",
-    "                    elif read.is_reverse and not orien[sa_info[2]]:\n",
-    "                        orien = 'RR'\n",
-    "                    else:\n",
-    "                        orien = 'FF'\n",
-    "                        \n",
-    "                        \n",
-    "                    return chr1, chr2, start, end, orien\n",
-    "                \n",
-    "                elif len(sa_info) == 2: # when there are two alignments, get_sa returns a list containing two nested lists in which the contig, start, orientation and cigar are recorded\n",
-    "                    chr1L = sa_info[0][0]\n",
-    "                    startL = sa_info[0][1]\n",
-    "                    chr2L = read.reference_name\n",
-    "                    endL = read.reference_start\n",
-    "                    \n",
-    "                    chr1R = read.reference_name\n",
-    "                    startR = read.reference_end\n",
-    "                    chr2R = sa_info[1][0]\n",
-    "                    endR = sa_info[1][1]\n",
-    "                    orientations = list('orienL','orienR')\n",
-    "                    n = 0\n",
-    "                    for i in range(0,len(orientations)):\n",
-    "                        \n",
-    "                        if orien[sa_info[n][2]] and read.is_reverse:\n",
-    "                            i = 'FR'\n",
-    "                        \n",
-    "                        if not orien[sa_info[n][2]] and not read.is_reverse:\n",
-    "                            i = 'RF'\n",
-    "                        if orien[sa_info[n][2]] and not read.is_reverse:\n",
-    "                            i = 'FF'\n",
-    "                        if not orien[sa_info[n][2]] and read.is_reverse:\n",
-    "                            i = 'RR'\n",
-    "                    \n",
-    "                    return chr1L, startL, chr2L, endL, orientation[0], chr1R, startR, chr2R, endR, orientation[1]\n",
-    "                 \n",
-    "            \n",
-    "        elif not split:\n",
-    "            chr1 = read.reference_name\n",
-    "            chr2 = read.next_reference_name\n",
-    "            end = read.next_reference_start\n",
-    "            \n",
-    "            if left_clipped(read) and not right_clipped(read):\n",
-    "                start = read.reference_start\n",
-    "            elif right_clipped(read) and not left_clipped(read):\n",
-    "                start = read.reference_end\n",
-    "            elif not (left_clipped(read) and right_clipped(read)):\n",
-    "                start = read.reference_start\n",
-    "            elif left_clipped(read) and right_clipped(read):\n",
-    "                start = read.reference_start\n",
-    "                end = read.reference_end\n",
-    "            \n",
-    "            \n",
-    "            if not read.is_reverse and read.mate_is_reverse:\n",
-    "                orien = 'FR'\n",
-    "            elif not read.is_reverse and not read.mate_is_reverse:\n",
-    "                orien = 'FF'\n",
-    "                                                                          \n",
-    "            elif read.is_reverse and not read.mate_is_reverse:\n",
-    "                orien = 'RF'\n",
-    "                                                                          \n",
-    "            else:\n",
-    "                orien = 'RR'\n",
-    "                \n",
-    "            return chr1, chr2, start, end, orien\n",
-    "                                                                          \n",
-    "\n",
-    "\n",
-    "    def get_clipped(self):\n",
-    "        '''\n",
-    "        \n",
-    "        Creates dictionary with all clipped reads (which do not have a supplementary alignment)\n",
-    "        dictionary contains the location where the reads map back to the reference\n",
-    "        '''\n",
-    "        \n",
-    "        \n",
-    "        clipped = {ch:{i:[] for i in self.orientation} for ch in self.chr_list}\n",
-    "        \n",
-    "        for read in self.iter:\n",
-    "            if not read.is_unmapped:\n",
-    "                if left_clipped(read) or right_clipped(read):\n",
-    "                    if not read.has_tag('SA'):\n",
-    "                        chr1,chr2,start,end,orien = self.sort_read(read=read)\n",
-    "                        if abs(start-end) > 10:\n",
-    "                            clipped[chr1][orien].append([chr1,start,chr2,end])\n",
-    "                \n",
-    "                       \n",
-    "        return clipped\n",
-    "    \n",
-    "    def get_split(self):\n",
-    "        '''\n",
-    "        Get positions of reads with Supplementary Alignment (SA)\n",
-    "        returns two directories:\n",
-    "            one for split reads positions with position of the supplementary alignment\n",
-    "            one for split read pisitions and their respective mate\n",
-    "           '''\n",
-    "        \n",
-    "        \n",
-    "        split = {ch:{i:[] for i in self.orientation} for ch in self.chr_list}\n",
-    "        split_mate = {ch:{i:[] for i in self.orientation} for ch in self.chr_list}\n",
-    "        for read in self.iter:\n",
-    "            if not read.is_unmapped:\n",
-    "               \n",
-    "                if read.has_tag('SA'):\n",
-    "                     \n",
-    "                    sa_info = get_sa(read)\n",
-    "                    if sa_info is not None:\n",
-    "                        chr1,chr2,start,end,orien = self.sort_read(read=read,split=True)\n",
-    "                        if abs(start-end) > 10:\n",
-    "                            split[chr1][orien].append([chr1,start,chr2,end])\n",
-    "                    \n",
-    "                        chr1,chr2,start,end,orien = self.sort_read(read=read)\n",
-    "                        if abs(start-end) > 10:\n",
-    "                            split_mate[chr1][orien].append([chr1,start,chr2,end])\n",
-    "                \n",
-    "        return split, split_mate\n",
-    "    \n",
-    "    def get_both_split(self):\n",
-    "        '''\n",
-    "        Returns positions of reads that are split on both left and right and who have two supplementary alignments\n",
-    "        dictionary contains the coordinates: \n",
-    "            SA on left side; start position read\n",
-    "            end position read; SA on right side\n",
-    "        '''\n",
-    "        \n",
-    "    \n",
-    "        both_split = {ch:{i:[] for i in self.orientation} for ch in self.chr_list}\n",
-    "        for read in self.iter:\n",
-    "            if not read.is_unmapped:\n",
-    "                if left_clipped(read) and right_clipped(read):\n",
-    "                    if read.has_tag('SA'):\n",
-    "                        sa_info = get_sa(read)\n",
-    "                        if len(sa_info) == 2: # if there are two SAs, sa_info returns a list with two nested lists. Otherwise it returns a list with 4 items\n",
-    "                            chr_1L, chr_2L, startL, endL, orienL, \\\n",
-    "                            chr_1R, chr_2R, startR, endR, orienR = self.sort_read(read=read,split =True)\n",
-    "                            if (abs(startL-endL) and abs(startR-endR)) > 10:\n",
-    "                                both_split[chr_1L][orienL].append([chr_1L,startL,chr_2L,endL, \\\n",
-    "                                                               chr_1R, chr_2R, startR, endR, orienR])\n",
-    "        return both_split\n",
-    "    \n",
-    "    def get_discordant(self,mean,stdev):\n",
-    "        '''\n",
-    "        Get positions discordant read pairs who are not clipped\n",
-    "        binned based on the deviation from the mean +/- STDEV \n",
-    "        param mean = mean\n",
-    "        param stdev = standard deviation \n",
-    "        '''\n",
-    "        mean, stdev = av_distance_reads()\n",
-    "        \n",
-    "        times = ['1XSD','2XSD','3XSD']\n",
-    "        discordant = {t:{ch:{i:[] for i in self.orientation} for ch in self.chr_list} for t in times}                                                         \n",
-    "        \n",
-    "        for read in self.iter:\n",
-    "            if not read.is_unmapped and not read.mate_is_unmapped and not right_clipped(read) and not left_clipped(read):\n",
-    "                dis = abs(read.next_reference_start - read.reference_start)\n",
-    "    \n",
-    "                if dis != 0:\n",
-    "                    chr1,chr2,start,end,orien = self.sort_read(read=read)\n",
-    "                    if abs(start-end) > 10:\n",
-    "                        if dis >= (mean+(3*stdev)) or dis <= (mean-(3*stdev)):\n",
-    "                            discordant['3XSD'][chr1][orien].append([chr1,start,chr2,end])\n",
-    "                        elif dis >= (mean+(2*stdev)) or dis <= (mean-(2*stdev)):\n",
-    "                            discordant['2XSD'][chr1][orien].append([chr1,start,chr2,end])\n",
-    "                        elif dis >= (mean+(stdev)) or dis <= (mean-(stdev)):\n",
-    "                            discordant['1XSD'][chr1][orien].append([chr1,start,chr2,end])       \n",
-    "        return discordant\n",
-    "    \n",
-    "\n",
-    "\n",
-    "def get_read_pos(bam,DataName):\n",
-    "    \n",
-    "    bam = pysam.AlignmentFile(bam,'rb')\n",
-    "    binned = bin_reads(bam)\n",
-    "    # get the chromosome list\n",
-    "    chr_list = binned.chr_list\n",
-    "\n",
-    "    # Produce Dataframes for different reads\n",
-    "    ## clipped reads:\n",
-    "    clipped = binned.get_clipped()\n",
-    "\n",
-    "    ## discordant reads:\n",
-    "    mean, stdev = av_distance_reads(bam)\n",
-    "    discor = binned.get_discordant(mean = mean, stdev= stdev)\n",
-    "\n",
-    "    ## split reads & split reds + mate:\n",
-    "    split, split_mate = binned.get_split()\n",
-    "\n",
-    "    ## Double split reads:\n",
-    "    both = binned.get_both_split()\n",
-    "\n",
-    "\n",
-    "    bam.close()\n",
-    "\n",
-    "\n",
-    "    # Generate Dataframes and save as csv:\n",
-    "    parent_dir  = os.getcwd()\n",
-    "    outdir = os.join(parent_dir,DataName)\n",
-    "    os.makedirs(outdir, exist_ok=True)\n",
-    "\n",
-    "\n",
-    "\n",
-    "    ## Dataframe clipped \n",
-    "    clipped_df = get_dataframe(clipped,chr_list)\n",
-    "    outfile = os.join(outdir,'clipped_pos.csv')\n",
-    "    clipped.to_csv(outfile,index=False)\n",
-    "\n",
-    "    ## Dataframes discordant readpairs\n",
-    "    stdevs = discor.keys()\n",
-    "    for sd in stdevs:\n",
-    "        df = get_dataframe(discor[sd],chr_list)\n",
-    "        outfile = os.join(outdir,'discordant_{}_pos.csv'.format(sd))\n",
-    "        df.to_csv(outfile,index=False)\n",
-    "    \n",
-    "    ## Dataframes split reads and split + mate reads \n",
-    "    split_df = get_dataframe(split,chr_list)\n",
-    "    split_mate_df = get_dataframe(split,chr_list)\n",
-    "\n",
-    "    df_names = ['split_pos','split_mate_pos']\n",
-    "    ('.'join([df_names[n],'csv'])\n",
-    "    n=0\n",
-    "    for df in [split_df,split_mate_df]:\n",
-    "        outfile = os.join(outdir,('.'join([df_names[n],'csv']))\n",
-    "        df.to_csv(outfile,index=False)\n",
-    "        n +=1\n",
-    "\n",
-    "    ## make a dataframe for read double split\n",
-    "    both_split = get_dataframe(both,chr_list)\n",
-    "\n",
-    "    outfile = os.join(outdir,'both_split_pos.csv')\n",
-    "    both_split.to_csv(outfile,index=False)\n",
-    "                          \n",
-    "                          \n",
-    "def main():\n",
-    "    parser = argparse.ArgumentParser(description='Extract read positions (discordant/clipped/split)')\n",
-    "    parser.add_argument('-b',\n",
-    "                        '--bam',\n",
-    "                        type=str,\n",
-    "                        help=\"Specify input file (BAM)\")\n",
-    "\n",
-    "    parser.add_argument('-DN',\n",
-    "                        '--DataName'\n",
-    "                        type=str\n",
-    "                        help = \"Specify name data/sample\")\n",
-    " \n",
-    " \n",
-    "    args = parser.parse_args()  \n",
-    "    \n",
-    "    \n",
-    "    get_read_pos(bam=args.bam,DataName = args.DataName)\n",
-    "                          \n",
-    "    \n",
-    "if __name__ == '__main__':\n",
-    "    main()\n",
-    "\n"
-   ]
-  }
- ],
- "metadata": {
-  "kernelspec": {
-   "display_name": "Python 3",
-   "language": "python",
-   "name": "python3"
-  },
-  "language_info": {
-   "codemirror_mode": {
-    "name": "ipython",
-    "version": 3
-   },
-   "file_extension": ".py",
-   "mimetype": "text/x-python",
-   "name": "python",
-   "nbconvert_exporter": "python",
-   "pygments_lexer": "ipython3",
-   "version": "3.8.6"
-  }
- },
- "nbformat": 4,
- "nbformat_minor": 4
-}
+#!/usr/bin/env python
+# coding: utf-8
+
+# In[ ]:
+
+
+import pysam
+import os 
+import statistics as st
+from collections import defaultdict
+from cigar import Cigar
+import pandas as pd
+
+
+def left_clipped(read):
+    '''
+    Function to determine is read is left clipped
+    by L.santuari (sv-channels)
+    '''
+    
+    if read.cigartuples is not None:
+            if read.cigartuples[0][0] in [4,5]:
+                return True
+            else:
+                return False
+    else:
+        return False
+    
+    
+def right_clipped(read):
+    '''
+    Function to determine is read is left clipped
+    by L.santuari (sv-channels)
+    '''
+    
+    if read.cigartuples is not None:
+            if read.cigartuples[-1][0] in [4,5]:
+                return True
+            else:
+                return False
+    else:
+        return
+
+    
+def get_sa(read, both=False):
+    '''
+    Get supplementary Alignment
+    If only one SA: returns list with four elements
+    If two SAs: returns nested list (two lists within one list)
+    '''
+    
+    if not read.is_unmapped:
+        if read.has_tag('SA'):
+            if len(read.get_tag('SA')) > 0:
+                sa = read.get_tag('SA').split(",") # split the string
+                if len(sa) < 7:
+                    sa_list = [sa[0],sa[1],sa[2],sa[3]]
+                    return sa_list # return the list
+               
+                elif len(sa) >6 and len(sa) < 12 and both:
+                    sa_list = [None,None]
+                    sa_list[0] =[sa[0],sa[1],sa[2],sa[3]] # append info first split alignment
+                    sa_list[1] = [sa[5][-2:],sa[6],sa[7],sa[8]] # append info second split alignment
+                    return sa_list # return the list
+
+def av_distance_reads(bam):
+    
+    distances = []
+    for read in bam.fetch():
+        
+        if read.is_proper_pair and (not read.is_unmapped)         and read.is_reverse != read.mate_is_reverse         and read.reference_name == read.next_reference_name:
+            
+            dis = abs(read.next_reference_start - read.reference_start)
+            if dis < 10**3:
+                
+                distances.append(dis)
+            
+            if len(distances) > 2 * 10 ** 6:
+                break
+    mean = st.mean(distances)
+    stdev = st.stdev(distances)
+    return mean, stdev
+
+def get_dataframe(dictionary,chr_list):
+    '''
+    Makes dataframe of given dictionary 
+    binned on chromosome 
+    binned on orientation of reads
+    '''
+
+    def get_subdf(dictionary,chr):
+        if len(dictionary[chr]) == 4:
+            cols = ['chr1','start','chr2','end']
+        elif len(dictionary[chr]) == 8:
+            cols = ['chr1 left','start left','chr2 left','end left','chr1 right','start right','chr2 right', 'end right']
+        sides = ['FR','RF','FF','RR']
+        for side in range(0,len(sides)):
+            sides[side] = pd.DataFrame(dictionary[chr][sides[side]], columns = cols)
+        df = pd.concat([sides[0],sides[1],sides[2],sides[3]])
+        
+        return df
+
+
+    name = 'chrom{}'
+    chroms = []
+    for ch in chr_list:
+        chroms.append(name.format(ch))   
+    
+    for i in range(0,len(chroms)):
+        chroms[i] = get_subdf(dictionary,chr_list[i])
+    total_df = pd.concat([chroms[0], chroms[1]],axis=1,keys = chr_list)
+    
+    return total_df
+
+class bin_reads:
+    '''
+    Class to extract: discordant read pairs, split and clipped reads.
+    positions of reads are returned in dictionary format
+    reads are binned on the contig they map to and orientation (forward, reverse)
+    discordant reads are additionally binned based on how far the distance between readpairs deviates from mean +- STDEV 
+    '''
+    
+    
+    def __init__(self,bam,chr=False,start=False,end=False):
+        '''
+        param bam: bamfile (pysam alignment)
+        opt.param chr: contig of interest
+        opt.param start = start position
+        opt.param end = end position
+        '''
+        
+        
+        self.header = bam.header
+        self.chr_list = list(i['SN'] for i in self.header['SQ'])
+        self.orientation = ['FF','RR','FR','RF']
+        if not(chr and start and end):
+            self.iter = bam.fetch()
+        else:
+            self.iter = bam.fetch(chr,start,end)
+            
+
+    def sort_read(self,read,split=False):
+        '''
+        
+        function to extract information about reads,
+        Determines the start and end,
+        Determines orientation 
+        '''
+        
+        
+        if split:
+            orien = {'+':True,'-':False}
+            sa_info = get_sa(read)
+            if sa_info is not None: 
+                if len(sa_info) == 4: # if there is only 1 SA, get_sa returns a list with the length of 4 (contig, start, orientation, cigar)
+                    if left_clipped(read) and not right_clipped(read):
+                        chr1 = sa_info[0]
+                        start = sa_info[1]
+                        chr2 = read.reference_name
+                        end = read.reference_start
+                    elif right_clipped(read) and not left_clipped(read):
+                        chr1 = read.reference_name
+                        start = read.reference_end
+                        chr2 = sa_info[0]
+                        end = rsa_info[1]
+                    if not read.is_reverse and not orien[sa_info[2]]:
+                        orien = 'FR'
+                    elif read.is_reverse and orien[sa_info[2]]:
+                        orien = 'RF'
+                    elif read.is_reverse and not orien[sa_info[2]]:
+                        orien = 'RR'
+                    else:
+                        orien = 'FF'
+                        
+                        
+                    return chr1, chr2, start, end, orien
+                
+                elif len(sa_info) == 2: # when there are two alignments, get_sa returns a list containing two nested lists in which the contig, start, orientation and cigar are recorded
+                    chr1L = sa_info[0][0]
+                    startL = sa_info[0][1]
+                    chr2L = read.reference_name
+                    endL = read.reference_start
+                    
+                    chr1R = read.reference_name
+                    startR = read.reference_end
+                    chr2R = sa_info[1][0]
+                    endR = sa_info[1][1]
+                    orientations = list('orienL','orienR')
+                    n = 0
+                    for i in range(0,len(orientations)):
+                        
+                        if orien[sa_info[n][2]] and read.is_reverse:
+                            i = 'FR'
+                        
+                        if not orien[sa_info[n][2]] and not read.is_reverse:
+                            i = 'RF'
+                        if orien[sa_info[n][2]] and not read.is_reverse:
+                            i = 'FF'
+                        if not orien[sa_info[n][2]] and read.is_reverse:
+                            i = 'RR'
+                    
+                    return chr1L, startL, chr2L, endL, orientation[0], chr1R, startR, chr2R, endR, orientation[1]
+                 
+            
+        elif not split:
+            chr1 = read.reference_name
+            chr2 = read.next_reference_name
+            end = read.next_reference_start
+            
+            if left_clipped(read) and not right_clipped(read):
+                start = read.reference_start
+            elif right_clipped(read) and not left_clipped(read):
+                start = read.reference_end
+            elif not (left_clipped(read) and right_clipped(read)):
+                start = read.reference_start
+            elif left_clipped(read) and right_clipped(read):
+                start = read.reference_start
+                end = read.reference_end
+            
+            
+            if not read.is_reverse and read.mate_is_reverse:
+                orien = 'FR'
+            elif not read.is_reverse and not read.mate_is_reverse:
+                orien = 'FF'
+                                                                          
+            elif read.is_reverse and not read.mate_is_reverse:
+                orien = 'RF'
+                                                                          
+            else:
+                orien = 'RR'
+                
+            return chr1, chr2, start, end, orien
+                                                                          
+
+
+    def get_clipped(self):
+        '''
+        
+        Creates dictionary with all clipped reads (which do not have a supplementary alignment)
+        dictionary contains the location where the reads map back to the reference
+        '''
+        
+        
+        clipped = {ch:{i:[] for i in self.orientation} for ch in self.chr_list}
+        
+        for read in self.iter:
+            if not read.is_unmapped:
+                if left_clipped(read) or right_clipped(read):
+                    if not read.has_tag('SA'):
+                        chr1,chr2,start,end,orien = self.sort_read(read=read)
+                        if abs(start-end) > 10:
+                            clipped[chr1][orien].append([chr1,start,chr2,end])
+                
+                       
+        return clipped
+    
+    def get_split(self):
+        '''
+        Get positions of reads with Supplementary Alignment (SA)
+        returns two directories:
+            one for split reads positions with position of the supplementary alignment
+            one for split read pisitions and their respective mate
+           '''
+        
+        
+        split = {ch:{i:[] for i in self.orientation} for ch in self.chr_list}
+        split_mate = {ch:{i:[] for i in self.orientation} for ch in self.chr_list}
+        for read in self.iter:
+            if not read.is_unmapped:
+               
+                if read.has_tag('SA'):
+                     
+                    sa_info = get_sa(read)
+                    if sa_info is not None:
+                        chr1,chr2,start,end,orien = self.sort_read(read=read,split=True)
+                        if abs(start-end) > 10:
+                            split[chr1][orien].append([chr1,start,chr2,end])
+                    
+                        chr1,chr2,start,end,orien = self.sort_read(read=read)
+                        if abs(start-end) > 10:
+                            split_mate[chr1][orien].append([chr1,start,chr2,end])
+                
+        return split, split_mate
+    
+    def get_both_split(self):
+        '''
+        Returns positions of reads that are split on both left and right and who have two supplementary alignments
+        dictionary contains the coordinates: 
+            SA on left side; start position read
+            end position read; SA on right side
+        '''
+        
+    
+        both_split = {ch:{i:[] for i in self.orientation} for ch in self.chr_list}
+        for read in self.iter:
+            if not read.is_unmapped:
+                if left_clipped(read) and right_clipped(read):
+                    if read.has_tag('SA'):
+                        sa_info = get_sa(read)
+                        if len(sa_info) == 2: # if there are two SAs, sa_info returns a list with two nested lists. Otherwise it returns a list with 4 items
+                            chr_1L, chr_2L, startL, endL, orienL,                             chr_1R, chr_2R, startR, endR, orienR = self.sort_read(read=read,split =True)
+                            if (abs(startL-endL) and abs(startR-endR)) > 10:
+                                both_split[chr_1L][orienL].append([chr_1L,startL,chr_2L,endL,                                                                chr_1R, chr_2R, startR, endR, orienR])
+        return both_split
+    
+    def get_discordant(self,mean,stdev):
+        '''
+        Get positions discordant read pairs who are not clipped
+        binned based on the deviation from the mean +/- STDEV 
+        param mean = mean
+        param stdev = standard deviation 
+        '''
+        mean, stdev = av_distance_reads()
+        
+        times = ['1XSD','2XSD','3XSD']
+        discordant = {t:{ch:{i:[] for i in self.orientation} for ch in self.chr_list} for t in times}                                                         
+        
+        for read in self.iter:
+            if not read.is_unmapped and not read.mate_is_unmapped and not right_clipped(read) and not left_clipped(read):
+                dis = abs(read.next_reference_start - read.reference_start)
+    
+                if dis != 0:
+                    chr1,chr2,start,end,orien = self.sort_read(read=read)
+                    if abs(start-end) > 10:
+                        if dis >= (mean+(3*stdev)) or dis <= (mean-(3*stdev)):
+                            discordant['3XSD'][chr1][orien].append([chr1,start,chr2,end])
+                        elif dis >= (mean+(2*stdev)) or dis <= (mean-(2*stdev)):
+                            discordant['2XSD'][chr1][orien].append([chr1,start,chr2,end])
+                        elif dis >= (mean+(stdev)) or dis <= (mean-(stdev)):
+                            discordant['1XSD'][chr1][orien].append([chr1,start,chr2,end])       
+        return discordant
+    
+
+
+def get_read_pos(bam,DataName):
+    
+    bam = pysam.AlignmentFile(bam,'rb')
+    binned = bin_reads(bam)
+    # get the chromosome list
+    chr_list = binned.chr_list
+
+    # Produce Dataframes for different reads
+    ## clipped reads:
+    clipped = binned.get_clipped()
+
+    ## discordant reads:
+    mean, stdev = av_distance_reads(bam)
+    discor = binned.get_discordant(mean = mean, stdev= stdev)
+
+    ## split reads & split reds + mate:
+    split, split_mate = binned.get_split()
+
+    ## Double split reads:
+    both = binned.get_both_split()
+
+
+    bam.close()
+
+
+    # Generate Dataframes and save as csv:
+    parent_dir  = os.getcwd()
+    outdir = os.join(parent_dir,DataName)
+    os.makedirs(outdir, exist_ok=True)
+
+
+
+    ## Dataframe clipped 
+    clipped_df = get_dataframe(clipped,chr_list)
+    outfile = os.join(outdir,'clipped_pos.csv')
+    clipped.to_csv(outfile,index=False)
+
+    ## Dataframes discordant readpairs
+    stdevs = discor.keys()
+    for sd in stdevs:
+        df = get_dataframe(discor[sd],chr_list)
+        outfile = os.join(outdir,'discordant_{}_pos.csv'.format(sd))
+        df.to_csv(outfile,index=False)
+    
+    ## Dataframes split reads and split + mate reads 
+    split_df = get_dataframe(split,chr_list)
+    split_mate_df = get_dataframe(split,chr_list)
+
+    df_names = ['split_pos','split_mate_pos']
+    ('.'join([df_names[n],'csv'])
+    n=0
+    for df in [split_df,split_mate_df]:
+        outfile = os.join(outdir,('.'join([df_names[n],'csv']))
+        df.to_csv(outfile,index=False)
+        n +=1
+
+    ## make a dataframe for read double split
+    both_split = get_dataframe(both,chr_list)
+
+    outfile = os.join(outdir,'both_split_pos.csv')
+    both_split.to_csv(outfile,index=False)
+                          
+                          
+def main():
+    parser = argparse.ArgumentParser(description='Extract read positions (discordant/clipped/split)')
+    parser.add_argument('-b',
+                        '--bam',
+                        type=str,
+                        help="Specify input file (BAM)")
+
+    parser.add_argument('-DN',
+                        '--DataName'
+                        type=str
+                        help = "Specify name data/sample")
+ 
+ 
+    args = parser.parse_args()  
+    
+    
+    get_read_pos(bam=args.bam,DataName = args.DataName)
+                          
+    
+if __name__ == '__main__':
+    main()
+
