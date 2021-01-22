@@ -355,7 +355,7 @@ class bin_reads:
 def get_read_pos(bam,DataName):
     
     bam = pysam.AlignmentFile(bam,'rb')
-    binned = bin_reads(bam,'12',10000,50000)
+    binned = bin_reads(bam)
     # get the chromosome list
     chr_list = binned.chr_list
 
@@ -365,17 +365,17 @@ def get_read_pos(bam,DataName):
 
     ## discordant reads:
     mean, stdev = av_distance_reads(bam)
-    binned = bin_reads(bam,'12',10000,50000)
+    binned = bin_reads(bam)
 
     discor = binned.get_discordant(mean = mean, stdev= stdev)
 
     ## split reads & split reds + mate:
-    binned = bin_reads(bam,'12',10000,20000)
+    binned = bin_reads(bam)
 
     split, split_mate = binned.get_split()
     
     ## Double split reads:
-    binned = bin_reads(bam,'12',10000,50000)
+    binned = bin_reads(bam)
 
     both = binned.get_both_split()
     print(both['12']['RR'][1])
@@ -433,8 +433,8 @@ def main():
                         help="Specify input file (BAM)")
 
     parser.add_argument('-DN',
-                        '--DataName'
-                        type=str
+                        '--DataName',
+                        type=str,
                         help = "Specify name data/sample")
  
  
