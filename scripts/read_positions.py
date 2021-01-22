@@ -42,7 +42,7 @@ def right_clipped(read):
         return
 
     
-def get_sa(read, both=False):
+def get_sa(read):
     '''
     Get supplementary Alignment
     If only one SA: returns list with four elements
@@ -57,7 +57,7 @@ def get_sa(read, both=False):
                     sa_list = [sa[0],sa[1],sa[2],sa[3]]
                     return sa_list # return the list
                
-                elif len(sa) >6 and len(sa) < 12 and both:
+                elif len(sa) >6 and len(sa) < 12:
                     sa_list = [None,None]
                     sa_list[0] =[sa[0],sa[1],sa[2],sa[3]] # append info first split alignment
                     sa_list[1] = [sa[5][-2:],sa[6],sa[7],sa[8]] # append info second split alignment
@@ -81,18 +81,18 @@ def av_distance_reads(bam):
     stdev = st.stdev(distances)
     return mean, stdev
 
-def get_dataframe(dictionary,chr_list):
+def get_dataframe(dictionary,chr_list,bs=False):
     '''
     Makes dataframe of given dictionary 
     binned on chromosome 
     binned on orientation of reads
     '''
 
-    def get_subdf(dictionary,chr):
-        if len(dictionary[chr]) == 4:
-            cols = ['chr1','start','chr2','end']
-        elif len(dictionary[chr]) == 8:
+    def get_subdf(dictionary,chr,bs = False):
+        if bs:
             cols = ['chr1 left','start left','chr2 left','end left','chr1 right','start right','chr2 right', 'end right']
+        else:
+            cols = ['chr1','start','chr2','end']
         sides = ['FR','RF','FF','RR']
         for side in range(0,len(sides)):
             sides[side] = pd.DataFrame(dictionary[chr][sides[side]], columns = cols)
@@ -107,9 +107,12 @@ def get_dataframe(dictionary,chr_list):
         chroms.append(name.format(ch))   
     
     for i in range(0,len(chroms)):
-        chroms[i] = get_subdf(dictionary,chr_list[i])
-    total_df = pd.concat([chroms[0], chroms[1]],axis=1,keys = chr_list)
-    
+        if bs:
+            chroms[i] = get_subdf(dictionary,chr_list[i],bs=True)
+        else:
+            chroms[i] = get_subdf(dictionary,chr_list[i])
+    total_df = pd.concat([chroms[0], chroms[1]],keys = chr_list)
+    total_df = total_df.dropna(axis = 'rows')
     return total_df
 
 class bin_reads:
@@ -162,7 +165,25 @@ class bin_reads:
                         chr1 = read.reference_name
                         start = read.reference_end
                         chr2 = sa_info[0]
-                        end = rsa_info[1]
+                        end = sa_info[1]
+                    elif right_clipped(read) and left_clipped(read):
+                        cigstring = read.cigarstring
+                        for l in range(0,len(cigstring)):
+                            if cigstring[l] in ['S','H']:
+                                clip = l
+                            elif cigstring[l] == 'M':
+                                Match = l
+                        if clip > Match:
+                            chr1 = sa_info[0]
+                            start = sa_info[1]
+                            chr2 = read.reference_name
+                            end = read.reference_start
+                        elif clip < Match:
+                            chr1 = read.reference_name
+                            start = read.reference_end
+                            chr2 = sa_info[0]
+                            end = sa_info[1]
+                                           
                     if not read.is_reverse and not orien[sa_info[2]]:
                         orien = 'FR'
                     elif read.is_reverse and orien[sa_info[2]]:
@@ -185,19 +206,19 @@ class bin_reads:
                     startR = read.reference_end
                     chr2R = sa_info[1][0]
                     endR = sa_info[1][1]
-                    orientations = list('orienL','orienR')
+                    orientation = ['orienL','orienR']
                     n = 0
-                    for i in range(0,len(orientations)):
+                    for i in range(0,len(orientation)):
                         
                         if orien[sa_info[n][2]] and read.is_reverse:
-                            i = 'FR'
+                            orientation[i] = 'FR'
                         
                         if not orien[sa_info[n][2]] and not read.is_reverse:
-                            i = 'RF'
+                            orientation[i] = 'RF'
                         if orien[sa_info[n][2]] and not read.is_reverse:
-                            i = 'FF'
+                            orientation[i] = 'FF'
                         if not orien[sa_info[n][2]] and read.is_reverse:
-                            i = 'RR'
+                            orientation[i] = 'RR'
                     
                     return chr1L, startL, chr2L, endL, orientation[0], chr1R, startR, chr2R, endR, orientation[1]
                  
@@ -273,11 +294,11 @@ class bin_reads:
                     sa_info = get_sa(read)
                     if sa_info is not None:
                         chr1,chr2,start,end,orien = self.sort_read(read=read,split=True)
-                        if abs(start-end) > 10:
+                        if abs(int(start)-int(end)) > 10:
                             split[chr1][orien].append([chr1,start,chr2,end])
                     
                         chr1,chr2,start,end,orien = self.sort_read(read=read)
-                        if abs(start-end) > 10:
+                        if abs(int(start)-int(end)) > 10:
                             split_mate[chr1][orien].append([chr1,start,chr2,end])
                 
         return split, split_mate
@@ -293,14 +314,14 @@ class bin_reads:
     
         both_split = {ch:{i:[] for i in self.orientation} for ch in self.chr_list}
         for read in self.iter:
-            if not read.is_unmapped:
-                if left_clipped(read) and right_clipped(read):
-                    if read.has_tag('SA'):
-                        sa_info = get_sa(read)
-                        if len(sa_info) == 2: # if there are two SAs, sa_info returns a list with two nested lists. Otherwise it returns a list with 4 items
-                            chr_1L, chr_2L, startL, endL, orienL,                             chr_1R, chr_2R, startR, endR, orienR = self.sort_read(read=read,split =True)
-                            if (abs(startL-endL) and abs(startR-endR)) > 10:
-                                both_split[chr_1L][orienL].append([chr_1L,startL,chr_2L,endL,                                                                chr_1R, chr_2R, startR, endR, orienR])
+             if not read.is_unmapped and read.has_tag('SA'):
+                sa_info = read.get_tag('SA').split(',')
+                if len(sa_info) > 6:
+                    chr_1L, startL, chr_2L, endL, orienL, \
+                    chr_1R, chr_2R, startR, endR, orienR = self.sort_read(read,split =True)
+                    if (abs(int(startL)-int(endL)) and abs(int(startR)-int(endR))) > 10:
+                        both_split[chr_1L][orienL].append([chr_1L,startL,chr_2L,endL, \
+                                                           chr_1R, chr_2R, startR, endR])
         return both_split
     
     def get_discordant(self,mean,stdev):
@@ -310,7 +331,6 @@ class bin_reads:
         param mean = mean
         param stdev = standard deviation 
         '''
-        mean, stdev = av_distance_reads()
         
         times = ['1XSD','2XSD','3XSD']
         discordant = {t:{ch:{i:[] for i in self.orientation} for ch in self.chr_list} for t in times}                                                         
@@ -335,7 +355,7 @@ class bin_reads:
 def get_read_pos(bam,DataName):
     
     bam = pysam.AlignmentFile(bam,'rb')
-    binned = bin_reads(bam)
+    binned = bin_reads(bam,'12',10000,50000)
     # get the chromosome list
     chr_list = binned.chr_list
 
@@ -345,54 +365,64 @@ def get_read_pos(bam,DataName):
 
     ## discordant reads:
     mean, stdev = av_distance_reads(bam)
+    binned = bin_reads(bam,'12',10000,50000)
+
     discor = binned.get_discordant(mean = mean, stdev= stdev)
 
     ## split reads & split reds + mate:
+    binned = bin_reads(bam,'12',10000,20000)
+
     split, split_mate = binned.get_split()
-
+    
     ## Double split reads:
+    binned = bin_reads(bam,'12',10000,50000)
+
     both = binned.get_both_split()
-
-
+    print(both['12']['RR'][1])
+    
     bam.close()
 
 
     # Generate Dataframes and save as csv:
     parent_dir  = os.getcwd()
-    outdir = os.join(parent_dir,DataName)
+    outdir = os.path.join(parent_dir,DataName)
     os.makedirs(outdir, exist_ok=True)
 
 
 
     ## Dataframe clipped 
     clipped_df = get_dataframe(clipped,chr_list)
-    outfile = os.join(outdir,'clipped_pos.csv')
-    clipped.to_csv(outfile,index=False)
-
+    if not clipped_df.empty:
+        outfile = os.path.join(outdir,'clipped_pos.csv')
+        clipped_df.to_csv(outfile,index=False)
+    else:
+        print('Empty dataframe: Clipped reads')
     ## Dataframes discordant readpairs
     stdevs = discor.keys()
     for sd in stdevs:
         df = get_dataframe(discor[sd],chr_list)
-        outfile = os.join(outdir,'discordant_{}_pos.csv'.format(sd))
-        df.to_csv(outfile,index=False)
-    
+        if not df.empty:
+            outfile = os.path.join(outdir,'discordant_{}_pos.csv'.format(sd))
+            df.to_csv(outfile,index=False)
+        else:
+            print('Empty dataframe: Discordant reads')
     ## Dataframes split reads and split + mate reads 
     split_df = get_dataframe(split,chr_list)
     split_mate_df = get_dataframe(split,chr_list)
 
-    df_names = ['split_pos','split_mate_pos']
-    ('.'join([df_names[n],'csv'])
-    n=0
-    for df in [split_df,split_mate_df]:
-        outfile = os.join(outdir,('.'join([df_names[n],'csv']))
-        df.to_csv(outfile,index=False)
-        n +=1
+    if not split_df.empty and not split_mate_df.empty:
+        split_df.to_csv(os.path.join(outdir,'.'.join(['split_pos','csv'])), index = False)
+        split_mate_df.to_csv(os.path.join(outdir,'.'.join(['split_mate_pos','csv'])), index = False)
+    else:
+        print('Empty dataframe: Split and Splitmate')
 
     ## make a dataframe for read double split
-    both_split = get_dataframe(both,chr_list)
-
-    outfile = os.join(outdir,'both_split_pos.csv')
-    both_split.to_csv(outfile,index=False)
+    both_split_df = get_dataframe(both,chr_list,bs=True)
+    if not both_split_df.empty:
+        outfile = os.path.join(outdir,'both_split_pos.csv')
+        both_split_df.to_csv(outfile,index=False)
+    else:
+        print('Empty dataframe: Split both sides')
                           
                           
 def main():
