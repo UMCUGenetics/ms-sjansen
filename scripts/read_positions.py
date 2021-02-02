@@ -69,7 +69,9 @@ def av_distance_reads(bam):
     distances = []
     for read in bam.fetch():
         
-        if read.is_proper_pair and (not read.is_unmapped)         and read.is_reverse != read.mate_is_reverse         and read.reference_name == read.next_reference_name:
+        if read.is_proper_pair and (not read.is_unmapped) \
+        and read.is_reverse != read.mate_is_reverse \
+        and read.reference_name == read.next_reference_name:
             
             dis = abs(read.next_reference_start - read.reference_start)
             if dis < 10**3:
@@ -91,9 +93,9 @@ def get_dataframe(dictionary,chr_list,bs=False):
 
     def get_subdf(dictionary,chr,bs = False):
         if bs:
-            cols = ['chr1_L','start_L','chr2_L','end_L','chr1_R','start_R','chr2_R', 'end_R', 'orientation']
+            cols = ['chr1_L','start_L','chr2_L','end_L','chr1_R','start_R','chr2_R', 'end_R', 'orientation', 'read type']
         else:
-            cols = ['chr1','start','chr2','end','orientation']
+            cols = ['chr1','start','chr2','end','orientation', 'read type']
         sides = ['FR','RF','FF','RR']
         for side in range(0,len(sides)):
             sides[side] = pd.DataFrame(dictionary[chr][sides[side]], columns = cols)
@@ -163,11 +165,13 @@ class bin_reads:
                         start = sa_info[1]
                         chr2 = read.reference_name
                         end = read.reference_start
+                        type = 'SPLIT_L'
                     elif right_clipped(read) and not left_clipped(read):
                         chr1 = read.reference_name
                         start = read.reference_end
                         chr2 = sa_info[0]
                         end = sa_info[1]
+                        type = 'SPLIT_R'
                     elif right_clipped(read) and left_clipped(read):
                         cigstring = read.cigarstring
                         for l in range(0,len(cigstring)):
@@ -180,16 +184,19 @@ class bin_reads:
                             start = sa_info[1]
                             chr2 = read.reference_name
                             end = read.reference_start
+                            type = 'SPLIT_L'
                         elif clip < Match:
                             chr1 = read.reference_name
                             start = read.reference_end
                             chr2 = sa_info[0]
                             end = sa_info[1]
+                            type = 'SPLIT_R'
                         else:
                             chr1 = read.reference_name
                             start = 'NaN'
                             chr2 = read.reference_name
                             end = 'NaN'
+                            type = 'NaN'
                     if not read.is_reverse and not orien[sa_info[2]]:
                         orien = 'FR'
                     elif read.is_reverse and orien[sa_info[2]]:
@@ -201,7 +208,7 @@ class bin_reads:
                     
                     #logging.info('Split Read %s processed at position: %s %s' %(read.qname,read.reference_name, read.reference_start))
                         
-                    return chr1, chr2, start, end, orien
+                    return chr1, chr2, start, end, orien, type
                 
                 elif len(sa_info) == 2: # when there are two alignments, get_sa returns a list containing two nested lists in which the contig, start, orientation and cigar are recorded
                     #logging.info('start process two-sided split read %s' % read.qname)
@@ -214,6 +221,8 @@ class bin_reads:
                     startR = read.reference_end
                     chr2R = sa_info[1][0]
                     endR = sa_info[1][1]
+                    type = 'SPLIT_LR'
+                    
                     orientation = ['orienL','orienR']
                     n = 0
                     for i in range(0,len(orientation)):
@@ -231,7 +240,7 @@ class bin_reads:
                     #logging.info('Two-sided split Read %s processed at position: %s %s' %(read.qname,read.reference_name, read.reference_start))
 
                     
-                    return chr1L, startL, chr2L, endL, orientation[0], chr1R, startR, chr2R, endR, orientation[1]
+                    return chr1L, startL, chr2L, endL, orientation[0], chr1R, startR, chr2R, endR, orientation[1], type
                  
             
         elif not split:
@@ -241,13 +250,17 @@ class bin_reads:
             
             if left_clipped(read) and not right_clipped(read):
                 start = read.reference_start
+                type = 'CLIP_R'
             elif right_clipped(read) and not left_clipped(read):
                 start = read.reference_end
+                type = 'CLIP_L'
             elif not (left_clipped(read) and right_clipped(read)):
                 start = read.reference_start
+                type = 'DISCOR'
             elif left_clipped(read) and right_clipped(read):
                 start = read.reference_start
                 end = read.reference_end
+                type = 'CLIP_LR'
             
             
             if not read.is_reverse and read.mate_is_reverse:
@@ -261,7 +274,7 @@ class bin_reads:
             else:
                 orien = 'RR'
                 
-            return chr1, chr2, start, end, orien
+            return chr1, chr2, start, end, orien, type
                                                                           
 
 
@@ -284,9 +297,9 @@ class bin_reads:
             if not read.is_unmapped:
                 if left_clipped(read) or right_clipped(read):
                     if not read.has_tag('SA'):
-                        chr1,chr2,start,end,orien = self.sort_read(read=read)
+                        chr1,chr2,start,end,orien, type = self.sort_read(read=read)
                         if abs(start-end) > 10:
-                            clipped[chr1][orien].append([chr1,start,chr2,end,orien])
+                            clipped[chr1][orien].append([chr1,start,chr2,end,orien, type])
                 
                        
         return clipped
@@ -312,13 +325,13 @@ class bin_reads:
                      
                 sa_info = get_sa(read)
                 if sa_info is not None and len(sa_info) == 4:
-                    chr1,chr2,start,end,orien = self.sort_read(read=read,split=True)
+                    chr1, chr2, start, end, orien, type = self.sort_read(read=read,split=True)
                     if abs(int(start)-int(end)) > 10:
-                        split[chr1][orien].append([chr1,start,chr2,end,orien])
+                        split[chr1][orien].append([chr1, start, chr2, end, orien,type])
 
-                    chr1,chr2,start,end,orien = self.sort_read(read=read)
+                    chr1, chr2, start, end, orien, type = self.sort_read(read=read)
                     if abs(int(start)-int(end)) > 10:
-                        split_mate[chr1][orien].append([chr1,start,chr2,end,orien])
+                        split_mate[chr1][orien].append([chr1, start, chr2, end, orien, type])
 
         return split, split_mate
     
@@ -345,12 +358,12 @@ class bin_reads:
                     continue
                 if len(sa_info) == 2:
                     chr_1L, startL, chr_2L, endL, orienL, \
-                    chr_1R, chr_2R, startR, endR, orienR = self.sort_read(read,split =True)
+                    chr_1R, chr_2R, startR, endR, orienR, type = self.sort_read(read,split =True)
                     
                     
                     if (abs(int(startL)-int(endL)) and abs(int(startR)-int(endR))) > 10:
                         both_split[chr_2L][orienL].append([chr_1L,startL,chr_2L,endL, \
-                                                           chr_1R, chr_2R, startR, endR, orienL])
+                                                           chr_1R, chr_2R, startR, endR, orienL, type])
         return both_split
     
     def get_discordant(self,mean,stdev):
@@ -375,14 +388,14 @@ class bin_reads:
                 dis = abs(read.next_reference_start - read.reference_start)
     
                 if dis != 0:
-                    chr1,chr2,start,end,orien = self.sort_read(read=read)
+                    chr1,chr2,start,end,orien,type = self.sort_read(read=read)
                     if abs(start-end) > 10:
                         if dis >= (mean+(3*stdev)) or dis <= (mean-(3*stdev)):
-                            discordant['3XSD'][chr1][orien].append([chr1,start,chr2,end,orien])
+                            discordant['3XSD'][chr1][orien].append([chr1,start,chr2,end,orien,type])
                         elif dis >= (mean+(2*stdev)) or dis <= (mean-(2*stdev)):
-                            discordant['2XSD'][chr1][orien].append([chr1,start,chr2,end,orien])
+                            discordant['2XSD'][chr1][orien].append([chr1,start,chr2,end,orien,type])
                         elif dis >= (mean+(stdev)) or dis <= (mean-(stdev)):
-                            discordant['1XSD'][chr1][orien].append([chr1,start,chr2,end,orien])       
+                            discordant['1XSD'][chr1][orien].append([chr1,start,chr2,end,orien,type])       
         return discordant
     
 
@@ -449,7 +462,7 @@ def get_read_pos(bam,DataName,rcsv = False,rjson = False):
         if rcsv:
             clipped_df.to_csv(outfile,index=False)
         if rjson:
-            clipped_df = to_json(clipped_df, ['chr1','orientation'])
+            clipped_df = to_json(clipped_df, ['chr1','read type','orientation'])
             clipped_df.to_json(outfile.replace('csv','json'),orient = 'records')
     else:
         print('Empty dataframe: Clipped reads')
@@ -465,7 +478,7 @@ def get_read_pos(bam,DataName,rcsv = False,rjson = False):
             if rcsv:
                 df.to_csv(outfile,index=False)
             if rjson:
-                df = to_json(clipped_df, ['chr1','orientation'])
+                df = to_json(clipped_df, ['chr1','read type','orientation'])
                 df.to_json(outfile.replace('csv','json'),orient = 'records')
                 
         
@@ -485,10 +498,10 @@ def get_read_pos(bam,DataName,rcsv = False,rjson = False):
             split_df.to_csv(outfile_s, index = False)
             split_mate_df.to_csv(outfile_sm, index = False)
         if rjson:
-            split_jdf = to_json(split_df, ['chr1','orientation'])
+            split_jdf = to_json(split_df, ['chr1','read type','orientation'])
             split_jdf.to_json(outfile_s.replace('csv','json'),orient = 'records')
                                   
-            split_mate_df = to_json(split_mate_df, ['chr1','orientation'])                      
+            split_mate_df = to_json(split_mate_df, ['chr1','read type','orientation'])                      
             split_mate_df.to_json(outfile_sm.replace('csv,json'),orient = 'records')
     else:
         print('Empty dataframe: Split and Splitmate')
