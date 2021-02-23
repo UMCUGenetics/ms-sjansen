@@ -159,7 +159,7 @@ class bin_reads:
             sa_info = get_sa(read)
             if sa_info is not None: 
                 if len(sa_info) == 4: # if there is only 1 SA, get_sa returns a list with the length of 4 (contig, start, orientation, cigar)
-                    #logging.info('start process split read %s' % read.qname)
+                    logging.info('start process split read %s' % read.qname)
                     if left_clipped(read) and not right_clipped(read):
                         chr1 = sa_info[0]
                         start = sa_info[1]
@@ -206,7 +206,7 @@ class bin_reads:
                     else:
                         orien = 'FF'
                     
-                    #logging.info('Split Read %s processed at position: %s %s' %(read.qname,read.reference_name, read.reference_start))
+                    logging.info('Split Read %s processed at position: %s %s' %(read.qname,read.reference_name, read.reference_start))
                         
                     return chr1, chr2, start, end, orien, type
                 
@@ -237,7 +237,7 @@ class bin_reads:
                         if not orien[sa_info[n][2]] and read.is_reverse:
                             orientation[i] = 'RR'
                     
-                    #logging.info('Two-sided split Read %s processed at position: %s %s' %(read.qname,read.reference_name, read.reference_start))
+                    logging.info('Two-sided split Read %s processed at position: %s %s' %(read.qname,read.reference_name, read.reference_start))
 
                     
                     return chr1L, startL, chr2L, endL, orientation[0], chr1R, startR, chr2R, endR, orientation[1], type
@@ -288,7 +288,7 @@ class bin_reads:
         n_r = 10 ** 6
         last_t = time()
         clipped = {ch:{i:[] for i in self.orientation} for ch in self.chr_list}
-        
+
         for i, read in enumerate(self.iter):
             if not i % n_r:
                 logging.info("%d clipped reads processed (%f alignments / s)" % \
@@ -391,10 +391,13 @@ class bin_reads:
                     chr1,chr2,start,end,orien,type = self.sort_read(read=read)
                     if abs(start-end) > 10:
                         if dis >= (mean+(3*stdev)) or dis <= (mean-(3*stdev)):
+                            type = 'DISCOR_3XSD'
                             discordant['3XSD'][chr1][orien].append([chr1,start,chr2,end,orien,type])
                         elif dis >= (mean+(2*stdev)) or dis <= (mean-(2*stdev)):
+                            type = 'DISCOR_2XSD'
                             discordant['2XSD'][chr1][orien].append([chr1,start,chr2,end,orien,type])
                         elif dis >= (mean+(stdev)) or dis <= (mean-(stdev)):
+                            type = 'DISCOR_1XSD'
                             discordant['1XSD'][chr1][orien].append([chr1,start,chr2,end,orien,type])       
         return discordant
     
@@ -491,7 +494,7 @@ def get_read_pos(bam,DataName,rcsv = False,rjson = False):
     if not split_df.empty and not split_mate_df.empty:
         logging.info('Processed Dataframe positions: %s reads' % 'Split ')
         print('Processed split reads data in dataframe')
-        outfile_s = os.path.join(outdir,'.'.join(['split_pos','csv']))
+        outfile_s = os.path.join(outdir,'.'.join(['split_SA','csv']))
         outfile_sm = os.path.join(outdir,'.'.join(['split_mate_pos','csv']))
         
         if rcsv:
