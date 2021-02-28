@@ -6,6 +6,7 @@
 
 ##### import packages
 from label_classes import SVRecord
+import argparse
 import pysam
 import os
 import pandas as pd
@@ -167,7 +168,7 @@ def get_sa_info(read, end = True):
        
     return sa_chr, sa_start, sa_end, orien, sa_side, cigar
     
-def get_reads_SVpos(bamfile, winsize, svlist, get_SA = True):
+def get_reads_SVpos(bamfile, winsize, svlist, get_SA = True, mean, stdev):
      
     cols = ['breakpoint_pos','read.qname','read_start','read_end','read_chrom', 'orientation', 'side','type']
     cols_SA = ['read.qname','SA_start','SA_end','SA_chrom', 'orientation', 'side','type']
@@ -278,6 +279,82 @@ def get_readpair_sv_overlap(df_bp1, df_bp2):
     overlapdf.columns = cols 
     
     return overlapdf
+
+def find_mate(bamfile, vcf, winsize, df_bp1, df_bp2, mean, stdev):
+    
+    
+    readbp1 = list(df_bp1['read.qname'])
+    readbp2 = list(df_bp2['read.qname'])
+    
+    bp_dfs = [df_bp1, df_bp2]
+    totaldfs[pd.DataFrame(), pd.DataFrame()]
+    
+    cols = ['bp_pos_r1','ID_r1','start_r1','end_r1','chrom_r1', 'side_r1', 'orien_r1','type_r1', \
+            'bp_pos_r2','ID_r2','start_r2','end_r2','chrom_r2', 'side_r2', 'orien_r2','type_r2']
+    for nrs, idlist in enumerate([readbp1,readbp2]):
+        for ID in idlist:
+    
+            for SV in SV_list:
+                chr1, pos1_start, pos1_end, chr2, pos2_start, pos2_end, sv = SV
+
+
+
+                for nr, breakpoint in enumerate([[pos1_start, pos1_end],[pos2_start, pos2_end]]):
+
+                    logging.info('finding mate, start processing reads at %d' % int(breakpoint[0]))
+
+                    fetchstart = int(breakpoint[0]) - winsize
+                    fetchend = int(breakpoint[1]) + winsize 
+
+                    with pysam.AlignmentFile(bamfile,'r') as bam:
+                        mean,stdev = av_distance_reads(bam)
+
+                        n_r = 10 ** 6
+                        last_t = time()
+                
+                        for i,read in enumerate(bam.fetch(chr1,fetchstart,fetchend)):
+                        
+                        if not i % n_r:
+                        logging.info("%d clipped reads processed (%f alignments / s)" % \
+                                     (i, n_r / (time() - last_t)))
+                        last_t = time()
+                        
+                        
+                        if read.qname == ID
+                        ID = read.qname
+                        r2_start, r2_chr, r2_end, m_start, m_chr, side, orien = get_read_info(read)
+                        if read.has_tag('SA'):
+                            type = 'SPLIT'
+                        elif side != 'NaN':
+                            type = 'CLIPPED'
+                        
+                        elif:
+                            dis = abs(m_start - r_start)
+                            if dis >= (mean+(3*stdev)) or dis <= (mean-(3*stdev)):
+                                type = 'DISCOR_3X'
+                            elif dis >= (mean+(2*stdev)) or dis <= (mean-(2*stdev)):
+                                type = 'DISCOR_2X'
+                            elif dis >= (mean+(stdev)) or dis <= (mean-(stdev)):
+                                type = 'DISCOR_1X'
+                            else:
+                                type = 'NORMAL'
+
+                        df = pd.DataFrame[[breakpoint, ID, r2_start, r2_chr, r2_end, side, orien]]
+                        df2 = bp_dfs[nrs][br_dfs[nrs]['read.qname'] == ID]
+                        
+                        readandmate = pd.concat([df, df2], axis = 1)
+                        totaldfs[nrs].append(readandmate)
+
+    readmate_bp1, readmate_bp2 = totaldfs
+    
+    return readmate_bp1, readmate_bp2
+            
+    
+    
+    
+    
+    
+    
 def get_df_split_SA(df_SA1,df_SA2, df_bp1,df_bp2):
     dfs = [pd.DataFrame,pd.DataFrame]
     SAs = [df_SA1, df_SA2]
@@ -294,7 +371,7 @@ def get_df_split_SA(df_SA1,df_SA2, df_bp1,df_bp2):
     
     return read_SAbp1, read_SAbp2
         
-def get_reads_at_breakpoints(bamfile, vcf, winsize = 100, DataName, returnCSV, get_SA = True):
+def get_reads_at_breakpoints(bamfile, vcf, winsize = 100, DataName, returnCSV, get_SA = True, get_overlap = False, find_mate = True):
     # make logfile
     
     FORMAT = '%(asctime)s %(message)s'
@@ -315,18 +392,42 @@ def get_reads_at_breakpoints(bamfile, vcf, winsize = 100, DataName, returnCSV, g
     assert os.path.isfile(vcf)
     SV_list = read_vcf(vcf)
     
+                             
+    # Determine av distance reads from bamfile:
+    mean,stdev = av_distance_reads(bam)
+                             
     # get reads overlapping the breakpoints
-    df_bp1, df_bp2, dfSA1, dfSA2 = get_reads_SVpos(bamfile, winsize = 100, svlist = SV_list, get_SA = True)
+    df_bp1, df_bp2, dfSA1, dfSA2 = get_reads_SVpos(bamfile, winsize = 100, svlist = SV_list, get_SA = True, mean= mean, stdev = stdev)
     
     # get readpairs overlapping SV
-    overlapdf = get_readpair_sv_overlap(df_bp1, df_bp2)
+    if get_overlap:
+                             
+        overlapdf = get_readpair_sv_overlap(df_bp1, df_bp2)
+        overlap_fname = 'readpairs_{}_overlap.csv'.format(DataName)
+        outfile = os.path.join(outdir,filenames[nr])
+        overlapdf.to.csv(outfile,index=False)
+        logging.info('Processed overlap df_bp1, df_bp2')                    
     
+    if find_mate: 
+        readmate_bp1, readmate_bp2 = find_mate(bamfile, vcf, winsize = 100, df_bp1, df_bp2, mean, stdev)
+        
+        df_rm_bp1_fname = 'readmate_bp1_{}.csv'.format(DataName)
+        df_rm_bp2_fname = 'readmate_bp2_{}.csv'.format(DataName)
+        
+        
+        filenames = [df_rm_bp1,df_rm_bp2]
+        for nr,df in enumerate([readmate_bp1, readmate_bp2]):
+                             
+            outfile = os.path.join(outdir,filenames[nr])
+            df.to.csv(outfile,index=False)
+            logging.info('Processed  %' % df)
+                             
     # record in csv format
     if returnCSV:
         
         df_bp1_fname = 'reads_bp1_{}_overlap.csv'.format(DataName)
         df_bp2_fname = 'reads_bp2_{}_overlap.csv'.format(DataName)
-        overlap_fname = 'readpairs_{}_overlap.csv'.format(DataName)
+        
         
         filenames = [df_bp1_fname,df_bp2_fname, overlap_fname]
         for nr,df in enumerate([df_bp1,df_bp2, overlapdf]):
@@ -379,11 +480,22 @@ def main():
                         '--get_sa',
                         type=bool,
                         default=True,
-                        help = '')                      
+                        help = '')
+    parser.add_argument('-gov',
+                        '--get_overlap',
+                        type=bool,
+                        default=False,
+                        help = '') 
+    parser.add_argument('-fm',
+                        '--find_mate',
+                        type=bool,
+                        default=True,
+                        help = '') 
     args = parser.parse_args()  
     
         
-    get_reads_at_breakpoints(bamfile = args.bamfile, vcf = args.SV_vcf, winsize = args.winsize, DataName = args.DataName, rcsv = args.returnCSV, get_SA = args.get_sa)
+    get_reads_at_breakpoints(bamfile = args.bamfile, vcf = args.SV_vcf, winsize = args.winsize, DataName = args.DataName, rcsv = args.returnCSV, get_SA = args.get_sa, \
+                            get_overlap = args.get_overlap, find_mate = args.find_mate)
     
 if __name__ == '__main__':
        main()
