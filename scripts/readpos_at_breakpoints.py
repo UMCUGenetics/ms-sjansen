@@ -11,13 +11,17 @@ import os
 import pandas as pd
 import statistics as st
 import os 
+from time import time
+import logging
 
 def av_distance_reads(bam):
     
     distances = []
     for read in bam.fetch():
         
-        if read.is_proper_pair and (not read.is_unmapped)         and read.is_reverse != read.mate_is_reverse         and read.reference_name == read.next_reference_name:
+        if read.is_proper_pair and (not read.is_unmapped) \
+        and read.is_reverse != read.mate_is_reverse \
+        and read.reference_name == read.next_reference_name:
             
             dis = abs(read.next_reference_start - read.reference_start)
             if dis < 10**3:
@@ -66,7 +70,7 @@ def right_clipped(read):
                 return False
     else:
         return
-def get_read_info(read, sa_orien = False):
+def get_read_info(read):
     
     r_start = read.reference_start
     r_end = read.reference_end
@@ -86,26 +90,17 @@ def get_read_info(read, sa_orien = False):
         side = 'NaN'
     
     
-    if sa_orien: 
-        orien = {'+':True,'-':False}
-        if not read.is_reverse and not orien[sa_orien]:
-            orien = 'FR'
-        elif read.is_reverse and orien[sa_orien]:
-            orien = 'RF'
-        elif read.is_reverse and not orien[sa_orien]:
-            orien = 'RR'
-        else:
-            orien = 'FF'
-    else:
-        if not read.is_reverse and read.mate_is_reverse:
-            orien = 'FR'
-        elif not read.is_reverse and not read.mate_is_reverse:
-            orien = 'FF'
+    
 
-        elif read.is_reverse and not read.mate_is_reverse:
-            orien = 'RF'
-        else:
-            orien = 'RR'
+    if not read.is_reverse and read.mate_is_reverse:
+        orien = 'FR'
+    elif not read.is_reverse and not read.mate_is_reverse:
+        orien = 'FF'
+
+    elif read.is_reverse and not read.mate_is_reverse:
+        orien = 'RF'
+    else:
+        orien = 'RR'
 
     
     return r_start, r_chr, r_end, m_start, m_chr, side, orien
@@ -132,7 +127,7 @@ def read_vcf(invcf):
             sv_list.append((chrom1, pos1_start, pos1_end,
                             chrom2, pos2_start, pos2_end, svtype))
         return sv_list
-def get_sa_info(read, end = False):
+def get_sa_info(read, end = True):
     
     def get_sa_end(sa_cigar, sa_start):
         
@@ -144,29 +139,41 @@ def get_sa_info(read, end = False):
                 s = nr
         if m > s:
             bp = sa_cigar[s+1:m]
+            sa_side = 'LEFT'
         else:
             bp = sa_cigar[:int(m)]
-            
+            sa_side = 'RIGHT'
         sa_end =int(bp) + sa_start
         
-        return sa_end 
+        return sa_end, sa_side
     
     satag = read.get_tag('SA')
     if len(satag) > 0:
         sa = satag.split(",")
-        sa_chr, sa_start, orien, cigar = sa[0], sa[1], sa[2], sa[3]
-        if end:
-            sa_end = get_sa_end(sa_start,cigar)
-            return sa_chr, sa_start, sa_end, orien, cigar
+        sa_chr, sa_start, sa_orien, cigar = sa[0], sa[1], sa[2], sa[3]
+        
+        # determine orientation
+        
+        orien = {'+':True,'-':False}
+        if not read.is_reverse and not orien[sa_orien]:
+            orien = 'FR'
+        elif read.is_reverse and orien[sa_orien]:
+            orien = 'RF'
+        elif read.is_reverse and not orien[sa_orien]:
+            orien = 'RR'
         else:
-            return sa_chr, sa_start, orien, cigar
-def get_reads_SVpos(bamfile, winsize, svlist):
-     
-    cols = ['breakpoint_pos','read.qname','read1_start','read1_end','read1_chrom', 'orientation', 'side','type']
+            orien = 'FF'
+        sa_end = get_sa_end(sa_start,cigar)
+       
+    return sa_chr, sa_start, sa_end, orien, sa_side, cigar
     
+def get_reads_SVpos(bamfile, winsize, svlist, get_SA = True):
+     
+    cols = ['breakpoint_pos','read.qname','read_start','read_end','read_chrom', 'orientation', 'side','type']
+    cols_SA = ['read.qname','SA_start','SA_end','SA_chrom', 'orientation', 'side','type']
 
     dfs = [pd.DataFrame(), pd.DataFrame()]
-    
+    dfSA = [pd.DataFrame(), pd.DataFrame()]
     for SV in SV_list:
         chr1, pos1_start, pos1_end, chr2, pos2_start, pos2_end, sv = SV
         
@@ -188,7 +195,8 @@ def get_reads_SVpos(bamfile, winsize, svlist):
                 for i,read in enumerate(bam.fetch(chr1,fetchstart,fetchend)):
                     
                     if not i % n_r:
-                        logging.info("%d clipped reads processed (%f alignments / s)" %                              (i, n_r / (time() - last_t)))
+                        logging.info("%d clipped reads processed (%f alignments / s)" % \
+                                     (i, n_r / (time() - last_t)))
                         last_t = time()
                     
                     brkpnt = breakpoint[0]
@@ -197,9 +205,8 @@ def get_reads_SVpos(bamfile, winsize, svlist):
                         type = 'CLIPPED'
                         ID = read.qname
                         r_start, r_chr, r_end, m_start, m_chr, side, orien = get_read_info(read)
-                        lst = [brkpnt, ID,r_start, r_chr, r_end, side, orien, type]
-                        #print(lst)
-                        df = pd.DataFrame([lst], columns = cols)
+                        
+                        df = pd.DataFrame([[brkpnt, ID,r_start, r_chr, r_end, side, orien, type]], columns = cols)
                         #print(df)
                         dfs[nr] = dfs[nr].append(df)
                     elif not read.is_unmapped and read.has_tag('SA'):
@@ -208,12 +215,22 @@ def get_reads_SVpos(bamfile, winsize, svlist):
                         if len(read.get_tag('SA').split(",")) == 6:
                             ID = read.qname
 
-                            sa_chr, sa_start, sa_orien, sa_cigar = get_sa_info(read)
-                            r_start, r_chr, r_end, m_start, m_chr, side, orien = get_read_info(read, sa_orien = sa_orien)
-                            lst = [brkpnt, ID, r_start, r_chr, r_end, side, orien, type]
+
                             
-                            df = pd.DataFrame([lst], columns = cols)
+                            r_start, r_chr, r_end, m_start, m_chr, side, orien = get_read_info(read)
+                            
+                            df = pd.DataFrame([[brkpnt, ID, r_start, r_chr, r_end, side, orien, type]], columns = cols)
                             dfs[nr] = dfs[nr].append(df)
+                            
+                            if get_SA:
+                                logging.info('start process Supplementary Alignment of read %s' % read.qname)
+                                sa_chr, sa_start, sa_end, sa_orien, sa_cigar = get_sa_info(read)
+                                SA = pd.DataFrame([[ID, sa_chr, sa_start, sa_end, sa_orien, 'SA']]columns = cols_SA)
+                                dfsa = pd.concat([df,SA], axis = 1)
+                
+                                dfSA[nr] = dfSA[nr].append(dfsa)
+                                
+                                
                     if not read.is_unmapped and not read.mate_is_unmapped and not right_clipped(read) and not left_clipped(read):
                         dis = abs(read.next_reference_start - read.reference_start)
                         if dis > 10:
@@ -232,13 +249,20 @@ def get_reads_SVpos(bamfile, winsize, svlist):
                                 df = pd.DataFrame([lst], columns = cols)
                                 dfs[nr] = dfs[nr].append(df)
     dfbp1, dfbp2 = dfs
-
-    return dfbp1, dfbp2
+    
+    if get_SA: 
+        
+        dfSA1, dfSA2 = dfSA
+        return dfbp1, dfbp2, dfSA1, dfSA2
+    
+    else:
+        return dfbp1, dfbp2
 
 def get_readpair_sv_overlap(df_bp1, df_bp2):
     
     overlap = list(set(list(df_bp1['read.qname'])) & set(list(df_bp2['read.qname'])))
-    cols = ['bp_pos_r1','ID_r1','start_r1','end_r1','chrom_r1', 'side_r1', 'orien_r1','type_r1',           'bp_pos_r2','ID_r2','start_r2','end_r2','chrom_r2', 'side_r2', 'orien_r2','type_r2']
+    cols = ['bp_pos_r1','ID_r1','start_r1','end_r1','chrom_r1', 'side_r1', 'orien_r1','type_r1', \
+            'bp_pos_r2','ID_r2','start_r2','end_r2','chrom_r2', 'side_r2', 'orien_r2','type_r2']
     
     overlapdf = pd.DataFrame()
     
@@ -254,8 +278,23 @@ def get_readpair_sv_overlap(df_bp1, df_bp2):
     overlapdf.columns = cols 
     
     return overlapdf
-
-def get_reads_at_breakpoints(bamfile, vcf, winsize, DataName, returnCSV):
+def get_df_split_SA(df_SA1,df_SA2, df_bp1,df_bp2):
+    dfs = [pd.DataFrame,pd.DataFrame]
+    SAs = [df_SA1, df_SA2]
+    for nr, breakpoint in enumerate([df_bp1,df_bp2]):
+        IDs = list(breakpoint['read.qname'])
+        
+        for ID in IDs:
+            readinfo = breakpoint[breakpoint['read.qname'] == ID]
+            SAinfo = SAs[nr][SAs[nr['read.qname'] == ID]
+            read_SA = pd.concat([readinfo,SAinfo])
+            dfs[nr] = dfs[nr].append(read_SA)
+    
+    read_SAbp1, read_SAbp2 = dfs
+    
+    return read_SAbp1, read_SAbp2
+        
+def get_reads_at_breakpoints(bamfile, vcf, winsize = 100, DataName, returnCSV, get_SA = True):
     # make logfile
     
     FORMAT = '%(asctime)s %(message)s'
@@ -277,14 +316,14 @@ def get_reads_at_breakpoints(bamfile, vcf, winsize, DataName, returnCSV):
     SV_list = read_vcf(vcf)
     
     # get reads overlapping the breakpoints
-    df_bp1, df_bp2 = get_reads_SVpos(bamfile, winsize, svlist = SV_list)
+    df_bp1, df_bp2, dfSA1, dfSA2 = get_reads_SVpos(bamfile, winsize = 100, svlist = SV_list, get_SA = True)
     
     # get readpairs overlapping SV
     overlapdf = get_readpair_sv_overlap(df_bp1, df_bp2)
     
     # record in csv format
     if returnCSV:
-        outdir = 
+        
         df_bp1_fname = 'reads_bp1_{}_overlap.csv'.format(DataName)
         df_bp2_fname = 'reads_bp2_{}_overlap.csv'.format(DataName)
         overlap_fname = 'readpairs_{}_overlap.csv'.format(DataName)
@@ -295,7 +334,19 @@ def get_reads_at_breakpoints(bamfile, vcf, winsize, DataName, returnCSV):
             df.to.csv(outfile,index=False)
             logging.info('Processed  %' % df)
         
-
+        if get_SA:
+            
+            df_bp1_SA, df_bp2_SA = get_df_split_SA(dfSAa, dfSA2, df_bp1,df_bp2)
+            
+            df_bp1_SA_fname = 'reads_bp1_{}_overlap.csv'.format(DataName)
+            df_bp2_SA_fname = 'reads_bp2_{}_overlap.csv'.format(DataName)
+            
+            for nr,df in enumerate([df_bp1,df_bp2, overlapdf]):
+            
+            outfile = os.path.join(outdir,filenames[nr])
+            df.to.csv(outfile,index=False)
+            
+            logging.info('Processed  %' % df)
     
 def main():
     parser = argparse.ArgumentParser(description='Extract read positions at SV breakpoints (discordant/clipped/split)')
@@ -324,10 +375,15 @@ def main():
                         type=int,
                         default=100,
                         help = '')
+    parser.add_argument('-gsa',
+                        '--get_sa',
+                        type=bool,
+                        default=True,
+                        help = '')                      
     args = parser.parse_args()  
     
         
-    get_reads_at_breakpoints(bamfile = args.bamfile, vcf = args.SV_vcf, winsize = args.winsize, DataName = args.DataName, rcsv = args.returnCSV)
+    get_reads_at_breakpoints(bamfile = args.bamfile, vcf = args.SV_vcf, winsize = args.winsize, DataName = args.DataName, rcsv = args.returnCSV, get_SA = args.get_sa)
     
 if __name__ == '__main__':
        main()
