@@ -191,18 +191,18 @@ def get_read_info(read):
 
 def get_mate(bamfile, read):
     with pysam.AlignmentFile(bamfile,'r') as bam:
-        for read in bam.fetch('12',1000,1010):
-            chrom = bam.get_reference_name(read.reference_id)
+        for i in bam.fetch('12',1000,1010):
+            if i == read:
 
-            try: 
-                mate = bam.mate(read) 
-                return mate
-            
-            except ValueError: 
+                try: 
+                    mate = bam.mate(read) 
+                    return mate
 
-                # Invalid mate (usually post-filtered) 
+                except ValueError: 
 
-                return False
+                    # Invalid mate (usually post-filtered) 
+
+                    return False
             
 def get_mate_type(read,mate, mean, stdev):
     
