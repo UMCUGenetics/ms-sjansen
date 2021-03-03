@@ -20,7 +20,9 @@ def av_distance_reads(bamfile):
     with pysam.AlignmentFile(bamfile,'r') as bam:
         for read in bam.fetch():
 
-            if read.is_proper_pair and (not read.is_unmapped)             and read.is_reverse != read.mate_is_reverse             and read.reference_name == read.next_reference_name:
+            if read.is_proper_pair and (not read.is_unmapped) \
+            and read.is_reverse != read.mate_is_reverse \
+            and read.reference_name == read.next_reference_name:
 
                 dis = abs(read.next_reference_start - read.reference_start)
                 if dis < 10**3:
@@ -229,8 +231,8 @@ def get_mate_type(read,mate, mean, stdev):
 
 def get_reads_SVpos(bamfile, svlist, mean, stdev, winsize, get_SA = True):
      
-    cols = ['breakpoint_pos','read_chrom','read_start','read_end','read_side','read_type','mate_chrom','mate_start', 'mate_end', 'mate side','mate_type', 'orientation']
-    cols_SA = ['read.qname','SA_start','SA_end','SA_chrom', 'orientation', 'side','type']
+    cols = ['breakpoint_pos','read_chrom','read_start','read_end','read_side','read_type','mate_chrom','mate_start', 'mate_end', 'mate_side','mate_type', 'orientation']
+    cols_SA = ['SA_chrom', 'SA_start', 'SA_end', 'SA_side','SA_type', 'SA_orientation']
 
     dfs = [pd.DataFrame(), pd.DataFrame()]
     dfSA = [pd.DataFrame(), pd.DataFrame()]
@@ -255,7 +257,8 @@ def get_reads_SVpos(bamfile, svlist, mean, stdev, winsize, get_SA = True):
                 for i,read in enumerate(bam.fetch(chroms[nr],fetchstart,fetchend)):
                     
                     if not i % n_r:
-                        logging.info("%d reads processed (%f alignments / s)" %                                      (i, n_r / (time() - last_t)))
+                        logging.info("%d reads processed (%f alignments / s)" % \
+                                     (i, n_r / (time() - last_t)))
                         last_t = time()
                     
                     brkpnt = breakpoint[0]
@@ -304,7 +307,7 @@ def get_reads_SVpos(bamfile, svlist, mean, stdev, winsize, get_SA = True):
                             if get_SA:
                                 logging.info('start process Supplementary Alignment of read %s' % read.qname)
                                 sa_chr, sa_start, sa_end, sa_orien, sa_side = get_sa_info(read)
-                                SA = pd.DataFrame([[ID, sa_chr, sa_start, sa_end, sa_orien, sa_side, 'SA']], columns = cols_SA)
+                                SA = pd.DataFrame([[sa_chr, sa_start, sa_end, sa_side,'SA', sa_orien]], columns = cols_SA)
                                 dfsa = pd.concat([df,SA], axis = 1)
                 
                                 dfSA[nr] = dfSA[nr].append(dfsa)
@@ -348,36 +351,24 @@ def get_reads_SVpos(bamfile, svlist, mean, stdev, winsize, get_SA = True):
         return dfbp1, dfbp2
 
     
-def get_reads_at_breakpoints(bamfile, vcf, DataName, returnCSV, get_SA = True):
-    
-    # make outdir
-    
-    parent_dir = os.getcwd()
-    outdir = os.path.join(parent_dir,DataName)
-    os.makedirs(outdir, exist_ok=True)
-    
-    
-    # make logfile
-    
-    FORMAT = '%(asctime)s %(message)s'
-    logfilename = os.path.join(outdir, '_'.join(['Logfile',str(time())]))   
-    logging.basicConfig(format=FORMAT,
-                            filename=logfilename,
-                            filemode='w',
-                            level=logging.INFO)
-    t0 = time()
+def get_reads_at_breakpoints(bamfile, vcf, out, DataName, returnCSV, get_SA = True):
     
     
     # generate SV list and start, end list
 
     SV_list = read_vcf(vcf)
+    logging.info('Succesfully processed sv list')
     
     # determine mean and stdev, define winsize (average length insert)
+    
     mean,stdev = av_distance_reads(bamfile)
     winsize = mean
-                             
+    logging.info('Determined mean and stdev from bamfile')                     
+    
     # get reads overlapping the breakpoints
-    df_bp1, df_bp2, dfSA1, dfSA2 = get_reads_SVpos(bamfile, svlist = SV_list, mean= mean, stdev = stdev, winsize = winsize, get_SA = True)
+    
+    logging.info('start extracting reads at %f' % time())
+    df_bp1, df_bp2, dfSA1, dfSA2 = get_reads_SVpos(bamfile = bamfile, svlist = SV_list, mean= mean, stdev = stdev, winsize = winsize, get_SA = True)
     
     if returnCSV:
         
@@ -385,25 +376,30 @@ def get_reads_at_breakpoints(bamfile, vcf, DataName, returnCSV, get_SA = True):
         df_bp2_fname = 'reads_bp2_{}_overlap.csv'.format(DataName)
         
         
-        filenames = [df_bp1_fname,df_bp2_fname, overlap_fname]
-        for nr,df in enumerate([df_bp1,df_bp2, overlapdf]):
-            outfile = os.path.join(outdir,filenames[nr])
-            df.to.csv(outfile,index=False)
-            logging.info('Processed  %' % df)
+        filenames = [df_bp1_fname,df_bp2_fname]
+        for nr,df in enumerate([df_bp1,df_bp2]):
+            outfile = os.path.join(out,filenames[nr])
+            df.to_csv(outfile,index=False)
+            logging.info('Processed  %s' % filenames[nr])
         
         if get_SA:
             
-            df_bp1_SA, df_bp2_SA = get_df_split_SA(dfSAa, dfSA2, df_bp1,df_bp2)
             
-            df_bp1_SA_fname = 'reads_bp1_{}_overlap.csv'.format(DataName)
-            df_bp2_SA_fname = 'reads_bp2_{}_overlap.csv'.format(DataName)
+            df_bp1_SA_fname = 'reads_SA_bp1_{}_overlap.csv'.format(DataName)
+            df_bp2_SA_fname = 'reads_SA_bp2_{}_overlap.csv'.format(DataName)
             
-            for nr,df in enumerate([df_bp1,df_bp2, overlapdf]):
+            filenames = [df_bp1_SA_fname, df_bp2_SA_fname]
+            for nr,df in enumerate([dfSA1, dfSA2]):
             
-                outfile = os.path.join(outdir,filenames[nr])
-                df.to.csv(outfile,index=False)
+                outfile = os.path.join(out,filenames[nr])
+                df.to_csv(outfile,index=False)
 
-                logging.info('Processed  %' % df)
+                logging.info('Processed  %s' % filenames[nr])
+     
+    logging.info('Time: read positions on BAM %s: %f' % \
+                 (DataName, (time() - t0)))
+
+    
 def main():
     parser = argparse.ArgumentParser(description='Extract read positions at SV breakpoints (discordant/clipped/split)')
     parser.add_argument('-b',
@@ -427,17 +423,37 @@ def main():
                         default=False,
                         help = 'Specify wheter you want .json formatted output')
     parser.add_argument('-gsa',
-                        '--get_sa',
+                        '--getSA',
                         type=bool,
                         default=True,
-                        help = '')
- 
+                        help = 'get supplementary alignment of split reads')
+    parser.add_argument('-p',
+                        '--outputpath',
+                        type=str,
+                        default='.',
+                        help = 'Specify output path')
 
     args = parser.parse_args()  
     
-        
-    get_reads_at_breakpoints(bamfile = args.bamfile, vcf = args.SV_vcf, DataName = args.DataName, returnCSV = args.returnCSV, get_SA = args.get_sa)
+    cmd_name = 'read positions SV'
+    output_dir = os.path.join(args.outputpath, cmd_name, args.DataName)
+    os.makedirs(output_dir, exist_ok=True)
     
+                        
+    FORMAT = '%(asctime)s %(message)s'
+    logfilename = os.path.join(output_dir, '_'.join(['Logfile',str(time())]))
+    
+    logging.basicConfig(format=FORMAT,
+                        filename=logfilename,
+                        filemode='w',
+                        level=logging.INFO)
+    
+    logging.info('Succesfully created logfile')
+    
+    get_reads_at_breakpoints(bamfile = args.bamfile, vcf = args.SV_vcf, out = output_dir, DataName = args.DataName, returnCSV = args.returnCSV, get_SA = args.getSA)
+    
+    logging.info('Time: read positions at SV breakpoints on BAM %s: %f' %
+                 (args.bamfile, (time() - t0)))
 if __name__ == '__main__':
        main()   
 
