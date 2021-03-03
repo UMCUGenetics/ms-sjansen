@@ -366,7 +366,7 @@ def get_reads_at_breakpoints(bamfile, vcf, out, DataName, returnCSV, get_SA = Tr
     # get reads overlapping the breakpoints
     
     logging.info('start extracting reads at %f' % time())
-    df_bp1, df_bp2, dfSA1, dfSA2 = get_reads_SVpos(bamfile = bamfile, svlist = SV_list[0:1], mean= mean, stdev = stdev, winsize = winsize, get_SA = True)
+    df_bp1, df_bp2, dfSA1, dfSA2 = get_reads_SVpos(bamfile = bamfile, svlist = SV_list, mean= mean, stdev = stdev, winsize = winsize, get_SA = True)
     
     if returnCSV:
         
