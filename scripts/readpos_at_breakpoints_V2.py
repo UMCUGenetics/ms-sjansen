@@ -285,8 +285,6 @@ def get_reads_SVpos(bamfile, svlist, mean, stdev, winsize, get_SA = True):
                         r_type = 'SPLIT'
                         if len(read.get_tag('SA').split(",")) == 6:
                             ID = read.qname
-
-
                             
                             r_start, r_chr, r_end,r_side, orien = get_read_info(read)
                             
@@ -368,7 +366,7 @@ def get_reads_at_breakpoints(bamfile, vcf, out, DataName, returnCSV, get_SA = Tr
     # get reads overlapping the breakpoints
     
     logging.info('start extracting reads at %f' % time())
-    df_bp1, df_bp2, dfSA1, dfSA2 = get_reads_SVpos(bamfile = bamfile, svlist = SV_list, mean= mean, stdev = stdev, winsize = winsize, get_SA = True)
+    df_bp1, df_bp2, dfSA1, dfSA2 = get_reads_SVpos(bamfile = bamfile, svlist = SV_list[0:1], mean= mean, stdev = stdev, winsize = winsize, get_SA = True)
     
     if returnCSV:
         
@@ -450,10 +448,13 @@ def main():
     
     logging.info('Succesfully created logfile')
     
+    t0 = time()
     get_reads_at_breakpoints(bamfile = args.bamfile, vcf = args.SV_vcf, out = output_dir, DataName = args.DataName, returnCSV = args.returnCSV, get_SA = args.getSA)
     
     logging.info('Time: read positions at SV breakpoints on BAM %s: %f' %
                  (args.bamfile, (time() - t0)))
+
+    
 if __name__ == '__main__':
-       main()   
+    main()   
 
