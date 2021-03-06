@@ -225,14 +225,12 @@ def get_svbp_list(svlist, svtype):
     
     return svbp_pos
 
-def get_reads_SVpos(bamfile, bp_pos, mean, stdev, winsize, get_SA = True):
+def get_reads_SVpos(bamfile, bp_pos, mean, stdev, winsize):
     chromdic = {}
     svpos = []
     cols = ['breakpoint_pos','read_chrom','read_start','read_end','read_side','read_type','mate_chrom','mate_start', 'mate_end', 'mate_side','mate_type', 'orientation']
-    cols_SA = ['SA_chrom', 'SA_start', 'SA_end', 'side','type', 'orientation']
-
-    dfread = pd.DataFrame()
-    dfSA = pd.DataFrame()
+    
+    lsread = []
             
     with pysam.AlignmentFile(bamfile,'r') as bam:
         
@@ -245,7 +243,7 @@ def get_reads_SVpos(bamfile, bp_pos, mean, stdev, winsize, get_SA = True):
 
             logging.info('start processing reads at %d' % int(breakpoint[1]))
             logging.info('%d of the %d, %d breakpoints left' % (nr, len(bp_pos), (len(bp_pos) - nr)))
-            #print('%d of the %d, %d breakpoints left' % (nr, len(bp_pos), (len(bp_pos) - nr)))
+            print('%d of the %d, %d breakpoints left' % (nr, len(bp_pos), (len(bp_pos) - nr)))
             
             fetchstart = int(breakpoint[1]) - winsize
             fetchend = int(breakpoint[2]) + winsize 
@@ -290,9 +288,9 @@ def get_reads_SVpos(bamfile, bp_pos, mean, stdev, winsize, get_SA = True):
                         m_type = 'UNMAPPED'
                         m_start, m_chr, m_end, m_side, m_orien = ['NaN','NaN','NaN','NaN','NaN']
 
-                    df = pd.DataFrame([[brkpnt,r_chr ,r_start, r_end, r_side, r_type, m_chr, m_start, m_end, m_side, m_type, orien]], columns = cols)
+        
                     #print(df)
-                    dfread = dfread.append(df)
+                    lsread.append([brkpnt,r_chr ,r_start, r_end, r_side, r_type, m_chr, m_start, m_end, m_side, m_type, orien])
 
                 elif not read.is_unmapped and read.has_tag('SA'):
                     logging.info('start process split read %s' % read.qname)
@@ -313,16 +311,15 @@ def get_reads_SVpos(bamfile, bp_pos, mean, stdev, winsize, get_SA = True):
                             m_start, m_chr, m_end, m_side, m_orien = ['NaN','NaN','NaN','NaN','NaN']
 
 
-                        df = pd.DataFrame([[brkpnt,r_chr ,r_start, r_end, r_side, r_type, m_chr ,m_start, m_end, m_side, m_type, orien]], columns = cols)
-                        dfread = dfread.append(df)
 
-                        if get_SA:
-                            logging.info('start process Supplementary Alignment of read %s' % read.qname)
-                            sa_chr, sa_start, sa_end, sa_orien, sa_side = get_sa_info(read)
-                            SA = pd.DataFrame([[sa_chr, sa_start, sa_end, sa_side,'SA', sa_orien]], columns = cols_SA)
-                            dfsa = pd.concat([df,SA], axis = 1)
+                        lsread.append([brkpnt,r_chr ,r_start, r_end, r_side, r_type, m_chr ,m_start, m_end, m_side, m_type, orien])
 
-                            dfSA = dfSA.append(dfsa)
+                        # get SA alignment
+                        logging.info('start process Supplementary Alignment of read %s' % read.qname)
+                        sa_chr, sa_start, sa_end, sa_orien, sa_side = get_sa_info(read)
+                    
+
+                        lsread.append([brkpnt,r_chr ,r_start, r_end, r_side, r_type, sa_chr, sa_start, sa_end, sa_side,'SA', sa_orien])
 
 
                 elif not read.is_unmapped and not read.mate_is_unmapped and not right_clipped(read) and not left_clipped(read):
@@ -349,18 +346,14 @@ def get_reads_SVpos(bamfile, bp_pos, mean, stdev, winsize, get_SA = True):
 
                             if dis >= (mean+(3*stdev)) or dis <= (mean-(3*stdev)):
                                 r_type = 'DISCOR_3X'
-
-
-                            df = pd.DataFrame([[brkpnt,r_chr ,r_start, r_end, r_side, r_type, m_chr, m_start, m_end, m_side, m_type, orien]], columns = cols)
-                            dfread = dfread.append(df)
-
-    if get_SA: 
-        return dfread, dfSA
+                            
+                            lsread.append([brkpnt,r_chr ,r_start, r_end, r_side, r_type, m_chr, m_start, m_end, m_side, m_type, orien])
+                            
+    dfread = pd.DataFrame(lsread, columns = cols)
     
-    else:
-        return dfread
+    return dfread
 
-def get_reads_at_svbp(bamfile, vcf, DataName, sv, outdir, get_SA):
+def get_reads_at_svbp(bamfile, vcf, DataName, sv, outdir):
     
     # determine mean and stdev
     mean, stdev = av_distance_reads(bamfile)
@@ -379,16 +372,15 @@ def get_reads_at_svbp(bamfile, vcf, DataName, sv, outdir, get_SA):
     logging.info('Generated lits of breakpoints of SV: %s' % sv)
     
     # Extract reads at breakpoint positions
-    dfread, dfSA = get_reads_SVpos(bamfile, bp_pos, mean, stdev, winsize, get_SA)
+    dfread = get_reads_SVpos(bamfile, bp_pos[:150], mean, stdev, winsize)
     logging.info('Extracted all reads')
     
     # to csv
-    fnames = ['read_at_SVbp_{}.csv'.format(DataName), 'splitread_and_SA_at_SVbp_{}.csv'.format(DataName)]
-    for nr,df in enumerate([dfread, dfSA]):
-        
-        outfile = os.path.join(outdir,fnames[nr])
-        df.to_csv(outfile,index=False)
-        logging.info('Created csv file for %s' % fnames[nr])
+    fname = 'read_at_SVbp_{}.csv'.format(DataName)
+   
+    outfile = os.path.join(outdir,fname)
+    dfread.to_csv(outfile,index=False)
+    logging.info('Created csv file for %s' % fname)
 
 
 def main():
@@ -418,7 +410,7 @@ def main():
                         help = 'Specify vcf with SVs')
     args = parser.parse_args()  
 
-    cmd_name = 'read positions SV'
+    cmd_name = 'readpos_SVbp'
     outdir = os.path.join(args.outpath, cmd_name, args.DataName)
     os.makedirs(outdir, exist_ok=True)
     
@@ -434,7 +426,7 @@ def main():
     
     t0 = time()
     
-    get_reads_at_svbp(bamfile = args.bam, vcf = args.svvcf, DataName = args.DataName, sv = args.svtype, outdir = outdir, get_SA = True)
+    get_reads_at_svbp(bamfile = args.bam, vcf = args.svvcf, DataName = args.DataName, sv = args.svtype, outdir = outdir)
     
     logging.info('Time: read positions at SV breakpoints on BAM %s: %f' % (args.bam, (time() - t0)))
     
