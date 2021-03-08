@@ -372,7 +372,7 @@ def get_reads_at_svbp(bamfile, vcf, DataName, sv, outdir):
     logging.info('Generated lits of breakpoints of SV: %s' % sv)
     
     # Extract reads at breakpoint positions
-    dfread = get_reads_SVpos(bamfile, bp_pos[:150], mean, stdev, winsize)
+    dfread = get_reads_SVpos(bamfile, bp_pos, mean, stdev, winsize)
     logging.info('Extracted all reads')
     
     # to csv
