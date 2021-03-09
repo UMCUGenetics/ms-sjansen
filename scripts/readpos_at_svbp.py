@@ -220,6 +220,7 @@ def get_svbp_list(svlist, svtype):
         chr1, pos1_start, pos1_end, chr2, pos2_start, pos2_end, sv = SV
         
         if sv in svtype:
+
             if svtype in ['DEL','INS']:
                 if abs(int(pos1_start) - int(pos2_start)) > 49:
                     svbp_pos.append([chr1,pos1_start,pos1_end])
@@ -227,6 +228,7 @@ def get_svbp_list(svlist, svtype):
             else:
                 svbp_pos.append([chr1,pos1_start,pos1_end])
                 svbp_pos.append([chr2, pos2_start, pos2_end])
+
     
     return svbp_pos
 
