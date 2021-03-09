@@ -75,7 +75,7 @@ def get_coor(file):
     return coor_list
 
 
-def subset_two_bpsupport(df,svlist, winsize):
+def subset_twobp_support(df, bplist, winsize):
     
     lsreads = []
     twosup = []
@@ -149,6 +149,7 @@ def subset_two_bpsupport(df,svlist, winsize):
 
 def one_support(lsreads, index_twosupport):
     
+    onesup = []
     cols = ['breakpoint','read_chrom','read_start','read_end','read_side', 'read_type',\
             'mate_chrom','mate_start', 'mate_end', 'mate_side','mate_type','orientation']
     
@@ -161,7 +162,12 @@ def one_support(lsreads, index_twosupport):
     
     return dfonesup
 
-def get_specific_readtype_sv_overlap(dfreads, bplist, split = False, dis = True, clip = True):
+def get_specific_readtype_sv_overlap(dfreads, bplist, split = False, dis = True, clip = True, get_twopos = False):
+    
+    if twopos:
+        bpref = ['breakpoint1', 'breakpoint2']
+    else:
+        bpref = ['breakpoint_pos', 'breakpoint_pos']
     
     filters = []
     filterlist = ['SPLIT','CLIP','DISCOR']
@@ -178,8 +184,9 @@ def get_specific_readtype_sv_overlap(dfreads, bplist, split = False, dis = True,
 
     for bpset in bplist:
         
-        data1 = dfreads[dfreads['breakpoint_pos'] == bpset[0]]
-        data2 = dfreads[dfreads['breakpoint_pos'] == bpset[1]]
+        data1 = dfreads[dfreads[bpref[0]] == bpset[0]]
+        data2 = dfreads[dfreads[bpref[1]] == bpset[1]]
+        
         test = []
         
         if data1.empty or data2.empty:
@@ -219,7 +226,7 @@ def get_specific_readtype_sv_overlap(dfreads, bplist, split = False, dis = True,
             
     return onebp, twobp
 
-def subset_reads(bamfile, vcf, fread, outdir, DataName, split, clip, dis):
+def subset_reads(bamfile, vcf, fread, outdir, DataName, split, clip, dis, get_twosup = True):
     
     logging.info('Generating list of read pos file')
     lread = get_coor(fread)
@@ -238,42 +245,55 @@ def subset_reads(bamfile, vcf, fread, outdir, DataName, split, clip, dis):
         bplist.append([pos1_start,pos2_start])
     
     # start subsetting reads
-    logging.info('start subsetting reads, (readpairs bridge SV)')
     
     ## subset reads: do readpairs bridge both Breakpoints of SV?
+    logging.info('start subsetting reads, (readpairs bridge SV)')
     
-    twosup, index = subset_twobp_support(dfread, svlist, winsize)
-    if len(twosupport) == 0:
+    twosup, index = subset_twobp_support(dfread, bplist, winsize)
+    if len(twosup) == 0:
         logging.info('Could not identify readpairs supporting both breakpoints of SV')
     
-    # Get dataframe reads only supporting one BP of SV
     
+    # subset reads: Get dataframe reads only supporting one BP of SV
+    if len(index) > 0:
+        print('dont know what goes wrong')
     logging.info('start subsetting reads (readpairs supporting only one breakpoint of SV)')
-    onesup = one_support(lreads, index)
-    
+    onesup = one_support(lread, index)
+    if len(onesup) == 0:
+        logging.info('Could not identify readpairs supporting only one breakpoint of SV')
+        
     # Filter reads based on type
     n = ['SPLIT','CLIP','DIS']
     rtype = []
     for nr, f in enumerate([split,clip,dis]):
-        if f:
+        if not f:
             rtype.append(n[nr])
-    
-    
+
+
     logging.info('filtering BP based on readtypes, implemented filters %s' % ' '.join(rtype))
     onebp, twobp = get_specific_readtype_sv_overlap(dfread, bplist, split = split, dis = dis, clip = clip)
+    
 
+     # Filter reads that cover both bp of SV on type
+        
+    if get_twosup:
+        logging.info('filtering BP supported by readpairs based on readtypes, implemented filters %s' % ' '.join(rtype))
+        onebp_twosup, twobp_twosup = get_specific_readtype_sv_overlap(twosup, bplist, split = split, dis = dis, clip = clip, twosup = True)
         
     # generate fname
     
     filters = ''.join(rtype)
-    fnames = ['readpair_1bp_{}','readpair_2bp_{}'].format(DataName) + ['1bp_filtered_{}','2bp_filtered_{}'].format(Dataname,filters)    
-    
+    fnames = [string.format(DataName) for string in ['readpair_1bp_{}.csv','readpair_2bp_{}.csv']] + \
+    [string.format(filters,DataName) for string in ['1bp_{}_filtered_{}.csv','2bp_{}_filtered_{}.csv']] 
+    if twosup:
+        fnames += [string.format(filters,DataName) for string in ['1bp_twosup_{}_filtered_{}.csv','2bp_twosup_{}_filtered_{}.csv']] 
     # to file
 
-    for nr, f in enumerate([twosup,onesup,onebp,twobp]):
-        fout = os.join.path(outdir,fnames[nr])
-        f.to_csv(fout,index=False)
-        logging.info('Generated file %s' % fnames[nr])
+    for nr, f in enumerate([twosup,onesup,onebp,twobp,onebp_twosup, twobp_twosup]):
+        if not f.empty:
+            fout = os.path.join(outdir,fnames[nr])
+            f.to_csv(fout,index=False)
+            logging.info('Generated file %s' % fnames[nr])
         
 
 def main():
@@ -320,6 +340,11 @@ def main():
                         type=bool,
                         default=True,
                         help = 'filter discordant reads,False == breakpoint must not be supported by discordant reads')
+    parser.add_argument('-ts',
+                        '--twosup',
+                        type=bool,
+                        default=True,
+                        help = 'Filter data of readpairs that bridge SV breakpoints')
     
     args = parser.parse_args()  
 
@@ -339,7 +364,7 @@ def main():
     
     t0 = time()
     
-    subset_reads(bamfile = args.bam, vcf = args.svvcf, fread = args.fread, outdir = outdir, DataName = args.DataName, split = args.split, clip = args.clip, dis = args.dis)
+    subset_reads(bamfile = args.bam, vcf = args.svvcf, fread = args.fread, outdir = outdir, DataName = args.DataName, split = args.split, clip = args.clip, dis = args.dis, twosup = args.twosup)
     
     logging.info('Time: read positions at SV breakpoints on BAM %s: %f' % (args.bam, (time() - t0)))
     

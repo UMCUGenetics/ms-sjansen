@@ -220,8 +220,13 @@ def get_svbp_list(svlist, svtype):
         chr1, pos1_start, pos1_end, chr2, pos2_start, pos2_end, sv = SV
         
         if sv in svtype:
-            svbp_pos.append([chr1,pos1_start,pos1_end])
-            svbp_pos.append([chr2, pos2_start, pos2_end])
+            if svtype in ['DEL','INS']:
+                if abs(int(pos1_start) - int(pos2_start)) > 49:
+                    svbp_pos.append([chr1,pos1_start,pos1_end])
+                    svbp_pos.append([chr2, pos2_start, pos2_end])
+            else:
+                svbp_pos.append([chr1,pos1_start,pos1_end])
+                svbp_pos.append([chr2, pos2_start, pos2_end])
     
     return svbp_pos
 
@@ -372,7 +377,8 @@ def get_reads_at_svbp(bamfile, vcf, DataName, sv, outdir):
     logging.info('Generated lits of breakpoints of SV: %s' % sv)
     
     # Extract reads at breakpoint positions
-    dfread = get_reads_SVpos(bamfile, bp_pos[:150], mean, stdev, winsize)
+
+    dfread = get_reads_SVpos(bamfile, bp_pos, mean, stdev, winsize)
     logging.info('Extracted all reads')
     
     # to csv
