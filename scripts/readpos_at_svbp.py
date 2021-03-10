@@ -293,7 +293,7 @@ def get_reads_SVpos(bamfile, bp_pos, mean, stdev, winsize):
                         m_start, m_chr, m_end, m_side, m_orien = get_read_info(mate)
                     else:
                         m_type = 'UNMAPPED'
-                        m_start, m_chr, m_end, m_side, m_orien = ['NaN','NaN','NaN','NaN','NaN']
+                        m_start, m_chr, m_end, m_side, m_orien = [0, 0, 0,'NaN','NaN']
 
         
                     #print(df)
@@ -315,7 +315,7 @@ def get_reads_SVpos(bamfile, bp_pos, mean, stdev, winsize):
                             m_start, m_chr, m_end, m_side, m_orien = get_read_info(mate)
                         else:
                             m_type = 'UNMAPPED'
-                            m_start, m_chr, m_end, m_side, m_orien = ['NaN','NaN','NaN','NaN','NaN']
+                            m_start, m_chr, m_end, m_side, m_orien = [0, 0, 0,'NaN','NaN']
 
 
 
@@ -345,7 +345,7 @@ def get_reads_SVpos(bamfile, bp_pos, mean, stdev, winsize):
                                 m_start, m_chr, m_end, m_side, m_orien = get_read_info(mate)
                             else:
                                 m_type = 'UNMAPPED'
-                                m_start, m_chr, m_end, m_side, m_orien = ['NaN','NaN','NaN','NaN','NaN']
+                                m_start, m_chr, m_end, m_side, m_orien = [0, 0, 0,'NaN','NaN']
 
 
                             if dis >= (mean+(2*stdev)) or dis <= (mean-(2*stdev)):
