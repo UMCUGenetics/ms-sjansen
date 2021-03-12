@@ -12,6 +12,7 @@ import statistics as st
 import os 
 from time import time
 import logging
+import sys
 
 def av_distance_reads(bamfile):
     
@@ -370,13 +371,21 @@ def get_reads_at_svbp(bamfile, vcf, DataName, sv, outdir):
     #make svlist
     
     svlist = read_vcf(vcf)
-    logging.info('Generated list of SVs')
+    if len(svlist) == 0:
+        logging.info('Could not extract sv positions based on given vcf file: %s' % vcf)
+        sys.exit('Could not generate SV list ')
+    else:
+        logging.info('Generated list of SVs')
     
     #make breakpoint pos list
     if type(sv) != list:
         sv = sv.split()
     bp_pos = get_svbp_list(svlist, sv)
-    logging.info('Generated lits of breakpoints of SV: %s' % sv)
+    if len(bp_pos) == 0:
+        logging.info('Could not generate breakpoint list based on given sv list')
+        sys.exit('Could not generate breakpoint list')
+    else:
+        logging.info('Generated lits of breakpoints of SV: %s' % sv)
     
     # Extract reads at breakpoint positions
 

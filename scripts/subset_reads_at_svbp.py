@@ -74,6 +74,24 @@ def get_coor(file):
             coor_list.append(row)
     return coor_list
 
+def get_svbp_list(svlist, svtype):
+    
+    svbp_pos = []
+    
+    for SV in svlist:
+        chr1, pos1_start, pos1_end, chr2, pos2_start, pos2_end, sv = SV
+        
+        if sv in svtype:
+
+            if svtype in ['DEL','INS']:
+                if abs(int(pos1_start) - int(pos2_start)) > 49:
+                    svbp_pos.append([pos1_start,pos2_start])
+            else:
+                svbp_pos.append([pos1_start,pos2_start])
+            
+
+    
+    return svbp_pos
 
 def subset_twobp_support(df, bplist, winsize):
     
@@ -229,7 +247,7 @@ def get_specific_readtype_sv_overlap(dfreads, bplist, split = False, dis = True,
     else:
         return onebp, twobp
 
-def subset_reads(bamfile, vcf, fread, svs, outdir, DataName, split, clip, dis, gts = True):
+def subset_reads(bamfile, vcf, fread, sv, outdir, DataName, split, clip, dis, gts = True):
     
     logging.info('Generating list of read pos file')
     lread = get_coor(fread)
@@ -242,11 +260,7 @@ def subset_reads(bamfile, vcf, fread, svs, outdir, DataName, split, clip, dis, g
     
     # make breakpoint list
     
-    bplist = []
-    for SV in svlist:
-        chr1, pos1_start, pos1_end, chr2, pos2_start, pos2_end, sv = SV
-        if sv in svs:
-            bplist.append([pos1_start,pos2_start])
+    bplist = get_svbp_list(svlist, sv)
     
     # start subsetting reads
     
@@ -354,7 +368,7 @@ def main():
     
     args = parser.parse_args()  
 
-    cmd_name = 'readpos_SVbp'
+    cmd_name = 'readpos_SVbp/subset'
     outdir = os.path.join(args.outpath, args.DataName, cmd_name)
     os.makedirs(outdir, exist_ok=True)
     
@@ -370,7 +384,7 @@ def main():
     
     t0 = time()
     
-    subset_reads(bamfile = args.bam, vcf = args.svvcf, fread = args.fread,svs = args.svtype, outdir = outdir, DataName = args.DataName, split = args.split, clip = args.clip, dis = args.dis, gts = args.gtwosup)
+    subset_reads(bamfile = args.bam, vcf = args.svvcf, fread = args.fread,sv = args.svtype, outdir = outdir, DataName = args.DataName, split = args.split, clip = args.clip, dis = args.dis, gts = args.gtwosup)
     
     logging.info('Time: subset reads at SV breakpoint positions %s: %f' % (args.bam, (time() - t0)))
     
