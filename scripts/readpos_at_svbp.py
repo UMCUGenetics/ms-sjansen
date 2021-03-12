@@ -419,7 +419,7 @@ def main():
     args = parser.parse_args()  
 
     cmd_name = 'readpos_SVbp'
-    outdir = os.path.join(args.outpath, cmd_name, args.DataName)
+    outdir = os.path.join(args.outpath, args.DataName, cmd_name)
     os.makedirs(outdir, exist_ok=True)
     
     

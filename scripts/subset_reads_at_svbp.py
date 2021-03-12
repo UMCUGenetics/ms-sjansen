@@ -103,20 +103,20 @@ def subset_twobp_support(df, bplist, winsize):
 
             if (len(r2)) > 0:
                 r1= df[(df['mate_chrom'] == mchr) & (df['mate_start'] == mstart) & (df['mate_end'] == mend)]
-
-                bp_pair = [int(list(r1['breakpoint_pos'])[0]), int(list(r2['breakpoint_pos'])[0])]
-                if bp_pair or [bp_pair[1],[bp_pair[0]]] in bplist:
-                    r1inf = list(r1.values[0])
-                    
-                    if bp_pair in bplist:
-                        r1inf.insert(1,bp_pair[1])
-                    else:
-                        r1inf.insert(0, bp_pair[1])
-                           
-                    lsreads.append(r1inf)
-                    nr +=1
-                    twosup.append(readnr)
+                bpr1, bpr2 = int(list(r1['breakpoint_pos'])[0]), int(list(r2['breakpoint_pos'])[0])
                 
+                if bpr1 == bpr2:
+                    continue
+                r1inf = list(r1[list(r1.columns)[1:]].values[0])
+                
+                if [bpr1, bpr2] in bplist:
+                    r1inf.insert(0,bpr1)
+                    r1inf.insert(1, bpr2)
+                
+                    lsreads.append(r1inf) 
+                    twosup.append(readnr)
+                    nr +=1
+
         else:
             split = df[(df['mate_type'] == 'SA'),(df['mate_start'] == m_start) &(df['mate_end'] == m_end)]
             if len(split) != 0:
@@ -229,7 +229,7 @@ def get_specific_readtype_sv_overlap(dfreads, bplist, split = False, dis = True,
     else:
         return onebp, twobp
 
-def subset_reads(bamfile, vcf, fread, outdir, DataName, split, clip, dis, gts = True):
+def subset_reads(bamfile, vcf, fread, svs, outdir, DataName, split, clip, dis, gts = True):
     
     logging.info('Generating list of read pos file')
     lread = get_coor(fread)
@@ -245,7 +245,8 @@ def subset_reads(bamfile, vcf, fread, outdir, DataName, split, clip, dis, gts = 
     bplist = []
     for SV in svlist:
         chr1, pos1_start, pos1_end, chr2, pos2_start, pos2_end, sv = SV
-        bplist.append([pos1_start,pos2_start])
+        if sv in svs:
+            bplist.append([pos1_start,pos2_start])
     
     # start subsetting reads
     
@@ -287,7 +288,7 @@ def subset_reads(bamfile, vcf, fread, outdir, DataName, split, clip, dis, gts = 
     fnames = [string.format(DataName) for string in ['readpair_1bp_{}.csv','readpair_2bp_{}.csv']] + \
     [string.format(filters,DataName) for string in ['1bp_{}_filtered_{}.csv','2bp_{}_filtered_{}.csv']] 
     
-    files = [twosup,onesup,onebp,twobp]
+    files = [onesup,twosup,onebp,twobp]
     
     if gts:
         fnames.append('2bp_twosup_{}_filtered_{}.csv'.format(filters,DataName))
@@ -354,7 +355,7 @@ def main():
     args = parser.parse_args()  
 
     cmd_name = 'readpos_SVbp'
-    outdir = os.path.join(args.outpath, cmd_name, args.DataName)
+    outdir = os.path.join(args.outpath, args.DataName, cmd_name)
     os.makedirs(outdir, exist_ok=True)
     
     
@@ -369,9 +370,9 @@ def main():
     
     t0 = time()
     
-    subset_reads(bamfile = args.bam, vcf = args.svvcf, fread = args.fread, outdir = outdir, DataName = args.DataName, split = args.split, clip = args.clip, dis = args.dis, gts = args.gtwosup)
+    subset_reads(bamfile = args.bam, vcf = args.svvcf, fread = args.fread,svs = args.svtype, outdir = outdir, DataName = args.DataName, split = args.split, clip = args.clip, dis = args.dis, gts = args.gtwosup)
     
-    logging.info('Time: read positions at SV breakpoints on BAM %s: %f' % (args.bam, (time() - t0)))
+    logging.info('Time: subset reads at SV breakpoint positions %s: %f' % (args.bam, (time() - t0)))
     
     
 if __name__ == '__main__':
