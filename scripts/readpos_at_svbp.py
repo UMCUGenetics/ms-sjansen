@@ -287,7 +287,7 @@ def get_reads_SVpos(bamfile, bp_pos, mean, stdev, winsize):
 
 
                     
-                    if not read.mate_is_unmapped:
+                    if not read.mate_is_unmapped and read.is_paired:
                         mate = bam.mate(read)
                         m_type = get_mate_type(read, mate, mean, stdev)
 
@@ -300,7 +300,7 @@ def get_reads_SVpos(bamfile, bp_pos, mean, stdev, winsize):
                     #print(df)
                     lsread.append([brkpnt,r_chr ,r_start, r_end, r_side, r_type, m_chr, m_start, m_end, m_side, m_type, orien])
 
-                elif not read.is_unmapped and read.has_tag('SA'):
+                elif not read.is_unmapped and read.is_paired and read.has_tag('SA'):
                     logging.info('start process split read %s' % read.qname)
                     r_type = 'SPLIT'
                     if len(read.get_tag('SA').split(",")) == 6:
@@ -330,7 +330,7 @@ def get_reads_SVpos(bamfile, bp_pos, mean, stdev, winsize):
                         lsread.append([brkpnt,r_chr ,r_start, r_end, r_side, r_type, sa_chr, sa_start, sa_end, sa_side,'SA', sa_orien])
 
 
-                elif not read.is_unmapped and not read.mate_is_unmapped and not right_clipped(read) and not left_clipped(read):
+                elif not read.is_unmapped and not read.mate_is_unmapped and read.is_paired and not right_clipped(read) and not left_clipped(read):
                     dis = abs(read.next_reference_start - read.reference_start)
                     if dis > 10:
                         if dis >= (mean+(stdev)) or dis <= (mean-(stdev)):
