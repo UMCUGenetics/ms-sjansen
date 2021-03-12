@@ -280,14 +280,14 @@ def get_reads_SVpos(bamfile, bp_pos, mean, stdev, winsize):
                     last_t = time()
 
                 brkpnt = breakpoint[1]
-                if is_clipped(read):
+                if is_clipped(read) and read.is_paired:
                     logging.info('start process clipped read %s' % read.qname)
                     r_type = 'CLIPPED'
                     r_start, r_chr, r_end, r_side, orien = get_read_info(read)
 
 
                     
-                    if not read.mate_is_unmapped and read.is_paired:
+                    if not read.mate_is_unmapped:
                         mate = bam.mate(read)
                         m_type = get_mate_type(read, mate, mean, stdev)
 
