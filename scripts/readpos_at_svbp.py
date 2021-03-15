@@ -249,7 +249,7 @@ def get_reads_SVpos(bamfile, bp_pos, mean, stdev, winsize):
         for nr, breakpoint in enumerate(bp_pos):
             #print(breakpoint)
 
-            logging.info('start processing reads at %d' % int(breakpoint[1]))
+            logging.info('start processing reads at chr %s, pos %d' % (breakpoint[0],int(breakpoint[1])))
             logging.info('%d of the %d, %d breakpoints left' % (nr, len(bp_pos), (len(bp_pos) - nr)))
             print('%d of the %d, %d breakpoints left' % (nr, len(bp_pos), (len(bp_pos) - nr)))
             
