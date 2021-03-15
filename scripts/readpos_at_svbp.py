@@ -332,7 +332,8 @@ def get_reads_SVpos(bamfile, bp_pos, mean, stdev, winsize):
 
                 elif not read.is_unmapped and not read.mate_is_unmapped and read.is_paired and not right_clipped(read) and not left_clipped(read):
                     dis = abs(read.next_reference_start - read.reference_start)
-		    logging.info('processing discordant read') 
+                    logging.info('processing discordant read') 
+                    
                     if dis > 10:
                         if dis >= (mean+(stdev)) or dis <= (mean-(stdev)):
                             ID = read.qname
@@ -358,7 +359,7 @@ def get_reads_SVpos(bamfile, bp_pos, mean, stdev, winsize):
                             
                             lsread.append([brkpnt,r_chr ,r_start, r_end, r_side, r_type, m_chr, m_start, m_end, m_side, m_type, orien])
                 else:
-		    logging.info('read not interesting, Continue next read')
+                    logging.info('read not interesting, Continue next read')
                     continue
                             
     dfread = pd.DataFrame(lsread, columns = cols)
