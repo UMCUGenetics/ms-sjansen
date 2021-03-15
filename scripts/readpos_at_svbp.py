@@ -280,27 +280,31 @@ def get_reads_SVpos(bamfile, bp_pos, mean, stdev, winsize):
                     last_t = time()
 
                 brkpnt = breakpoint[1]
-                if is_clipped(read) and read.is_paired:
+                if is_clipped(read):
                     logging.info('start process clipped read %s' % read.qname)
                     r_type = 'CLIPPED'
                     r_start, r_chr, r_end, r_side, orien = get_read_info(read)
 
 
                     
-                    if not read.mate_is_unmapped:
-                        mate = bam.mate(read)
-                        m_type = get_mate_type(read, mate, mean, stdev)
+                    if read.is_paired and not read.mate_is_unmapped:
+                        
+                        try:
+                            mate = bam.mate(read)
+                            m_type = get_mate_type(read, mate, mean, stdev)
 
-                        m_start, m_chr, m_end, m_side, m_orien = get_read_info(mate)
-                    else:
-                        m_type = 'UNMAPPED'
-                        m_start, m_chr, m_end, m_side, m_orien = [0, 0, 0,'NaN','NaN']
+                            m_start, m_chr, m_end, m_side, m_orien = get_read_info(mate)
+                        
+                        except ValueError:
+                            
+                            m_type = 'UNMAPPED'
+                            m_start, m_chr, m_end, m_side, m_orien = [0, 0, 0,'NaN','NaN']
 
         
                     #print(df)
                     lsread.append([brkpnt,r_chr ,r_start, r_end, r_side, r_type, m_chr, m_start, m_end, m_side, m_type, orien])
 
-                elif not read.is_unmapped and read.is_paired and read.has_tag('SA'):
+                elif not read.is_unmapped and read.has_tag('SA'):
                     logging.info('start process split read %s' % read.qname)
                     r_type = 'SPLIT'
                     if len(read.get_tag('SA').split(",")) == 6:
@@ -309,14 +313,19 @@ def get_reads_SVpos(bamfile, bp_pos, mean, stdev, winsize):
                         r_start, r_chr, r_end,r_side, orien = get_read_info(read)
 
 
-                        if not read.mate_is_unmapped:
-                            mate = bam.mate(read)
-                            m_type = get_mate_type(read, mate, mean, stdev)
+                        if not read.mate_is_unmapped and read.is_paired:
+                           
+                            try:
+                                
+                                mate = bam.mate(read)
+                                m_type = get_mate_type(read, mate, mean, stdev)
 
-                            m_start, m_chr, m_end, m_side, m_orien = get_read_info(mate)
-                        else:
-                            m_type = 'UNMAPPED'
-                            m_start, m_chr, m_end, m_side, m_orien = [0, 0, 0,'NaN','NaN']
+                                m_start, m_chr, m_end, m_side, m_orien = get_read_info(mate)
+                        
+                            except ValueError:
+
+                                m_type = 'UNMAPPED'
+                                m_start, m_chr, m_end, m_side, m_orien = [0, 0, 0,'NaN','NaN']
 
 
 
@@ -336,28 +345,32 @@ def get_reads_SVpos(bamfile, bp_pos, mean, stdev, winsize):
                     
                     if dis > 10:
                         if dis >= (mean+(stdev)) or dis <= (mean-(stdev)):
-                            ID = read.qname
                             r_start, r_chr, r_end, r_side, orien = get_read_info(read)
                             r_type = 'DISCOR_1X'
-
                             
-                            if not read.mate_is_unmapped:
-                                mate = bam.mate(read)
-                                m_type = get_mate_type(read, mate, mean, stdev)
-
-                                m_start, m_chr, m_end, m_side, m_orien = get_read_info(mate)
-                            else:
-                                m_type = 'UNMAPPED'
-                                m_start, m_chr, m_end, m_side, m_orien = [0, 0, 0,'NaN','NaN']
-
-
                             if dis >= (mean+(2*stdev)) or dis <= (mean-(2*stdev)):
                                 r_type = 'DISCOR_2X'
 
                             if dis >= (mean+(3*stdev)) or dis <= (mean-(3*stdev)):
                                 r_type = 'DISCOR_3X'
                             
+                            try:
+                                mate = bam.mate(read)
+                                m_type = get_mate_type(read, mate, mean, stdev)
+
+                                m_start, m_chr, m_end, m_side, m_orien = get_read_info(mate)
+                            
+                            except ValueError:
+                                
+                                m_type = 'UNMAPPED'
+                                m_start, m_chr, m_end, m_side, m_orien = [0, 0, 0,'NaN','NaN']
+
+
+                            
+                            
                             lsread.append([brkpnt,r_chr ,r_start, r_end, r_side, r_type, m_chr, m_start, m_end, m_side, m_type, orien])
+                    else:
+                        continue
                 else:
                     logging.info('read not interesting, Continue next read')
                     continue
