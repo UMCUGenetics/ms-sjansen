@@ -356,6 +356,8 @@ def get_reads_SVpos(bamfile, bp_pos, mean, stdev, winsize):
                                 r_type = 'DISCOR_3X'
                             
                             lsread.append([brkpnt,r_chr ,r_start, r_end, r_side, r_type, m_chr, m_start, m_end, m_side, m_type, orien])
+                else:
+                    continue
                             
     dfread = pd.DataFrame(lsread, columns = cols)
     
